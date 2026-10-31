@@ -3,13 +3,14 @@ import os
 import time
 from datetime import datetime
 
+import jdatetime
 import pytz
 import requests
 from telegram import Bot
 from telegram.error import TelegramError
 
 # ==================== کلیدها (قرار داده‌شده مستقیماً در کد) ====================
-TELEGRAM_BOT_TOKEN = "9214310265:AAGUv7yYcmWWare4eTql2dzYOuLFT89h3l0"
+TELEGRAM_BOT_TOKEN = "9214310265:AAGUV7yYcmWWare4eTql2dzYoULFT89h310"
 FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71"
 
 CHANNEL_ID = "@footbal7079"
@@ -30,12 +31,14 @@ API_BASE_URL = "https://api.football-data.org/v4"
 
 
 def convert_utc_to_tehran(utc_date_str):
-    """تبدیل زمان UTC مسابقه به زمان تهران."""
+    """تبدیل زمان UTC مسابقه به زمان تهران و تاریخ شمسی."""
     try:
         utc_dt = datetime.strptime(utc_date_str, "%Y-%m-%dT%H:%M:%SZ")
         utc_dt = pytz.UTC.localize(utc_dt)
         tehran_dt = utc_dt.astimezone(pytz.timezone("Asia/Tehran"))
-        return tehran_dt.strftime("%Y-%m-%d  ⏰ %H:%M")
+        
+        jalali_dt = jdatetime.Datetime.fromgregorian(datetime=tehran_dt)
+        return jalali_dt.strftime("%Y/%m/%d  ⏰ %H:%M")
     except (ValueError, TypeError):
         return utc_date_str
 
@@ -124,7 +127,6 @@ def generate_match_posts():
             away_id = match["awayTeam"]["id"]
             match_time = convert_utc_to_tehran(match.get("utcDate", ""))
 
-            # افزایش زمان مکث به ۳ ثانیه برای جلوگیری از خطای 429
             time.sleep(3)
             home_form = get_team_form(home_id)
 
