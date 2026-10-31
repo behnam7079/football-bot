@@ -33,15 +33,12 @@ API_BASE_URL = "https://api.football-data.org/v4"
 def convert_utc_to_tehran(utc_date_str):
     """تبدیل زمان UTC مسابقه به زمان تهران و تاریخ شمسی."""
     try:
-        # پشتیبانی از زمان‌هایی مثل ...Z و ...+00:00
         date_str = utc_date_str.strip()
-
         if date_str.endswith("Z"):
             date_str = date_str[:-1] + "+00:00"
 
         utc_dt = datetime.fromisoformat(date_str)
 
-        # اگر زمان منطقهٔ زمانی نداشت، آن را UTC در نظر بگیر
         if utc_dt.tzinfo is None:
             utc_dt = pytz.UTC.localize(utc_dt)
         else:
@@ -50,7 +47,6 @@ def convert_utc_to_tehran(utc_date_str):
         tehran_tz = pytz.timezone("Asia/Tehran")
         tehran_dt = utc_dt.astimezone(tehran_tz)
 
-        # تبدیل به datetime بدون timezone برای سازگاری با jdatetime
         tehran_naive = tehran_dt.replace(tzinfo=None)
         jalali_dt = jdatetime.datetime.fromgregorian(datetime=tehran_naive)
 
@@ -78,7 +74,6 @@ def get_team_form(team_id):
             return "اطلاعاتی ثبت نشده"
 
         matches = response.json().get("matches", [])
-
         matches = sorted(
             matches,
             key=lambda match: match.get("utcDate", ""),
@@ -86,7 +81,6 @@ def get_team_form(team_id):
         )
 
         form = []
-
         for match in matches[:5]:
             winner = match.get("score", {}).get("winner")
             home_id = match.get("homeTeam", {}).get("id")
@@ -115,7 +109,6 @@ def calculate_probabilities(home_form, away_form):
     draw_score = 3
 
     total = home_score + away_score + draw_score
-
     if total <= 0:
         return 33, 34, 33
 
@@ -142,17 +135,18 @@ def generate_match_posts():
                 timeout=20
             )
 
-            if response.status_code != 200:
-                print(
-                    f"خطا در دریافت مسابقات {league_name}: "
-                    f"کد {response.status_code}"
-                )
+            if response.status_code == 429:
+                print(f"⚠️ خطای ۴۲۹ (محدودیت درخواست) برای {league_name}؛ توقف کوتاه‌مدت...")
+                time.sleep(10)
+                continue
+            elif response.status_code != 200:
+                print(f"خطا در دریافت مسابقات {league_name}: کد {response.status_code}")
                 continue
 
             matches = response.json().get("matches", [])
 
         except requests.RequestException as error:
-            print(f"خطا در دریافت مسابقات {league_name}: {error}")
+            print(f"خطا در ارتباط با سرور برای {league_name}: {error}")
             continue
 
         matches.sort(key=lambda match: match.get("utcDate", ""))
@@ -164,10 +158,10 @@ def generate_match_posts():
             away_id = match["awayTeam"]["id"]
             match_time = convert_utc_to_tehran(match.get("utcDate", ""))
 
-            time.sleep(3)
+            time.sleep(4)
             home_form = get_team_form(home_id)
 
-            time.sleep(3)
+            time.sleep(4)
             away_form = get_team_form(away_id)
 
             p_home, p_draw, p_away = calculate_probabilities(
@@ -197,6 +191,9 @@ def generate_match_posts():
 
             all_posts.append(post)
 
+        # مکث بین درخواست لیگ‌ها برای جلوگیری از خطای ۴۲۹
+        time.sleep(5)
+
     return all_posts
 
 
@@ -205,18 +202,12 @@ async def main():
     posts = generate_match_posts()
 
     if not posts:
-        print("⚠️ مسابقهٔ آینده‌ای برای انتشار پیدا نشد.")
+        print("⚠️ مسابقهٔ آینده‌ای برای انتشار پیدا نشد یا درخواست‌ها محدود شدند.")
         return
 
     print(f"✅ {len(posts)} مسابقه دریافت شد؛ ارسال به کانال شروع می‌شود.")
 
-    # اضافه شدن پارامترهای Timeout برای جلوگیری از خطای قطع ارتباط روی سرور گیت‌هاب
-    async with Bot(
-        token=TELEGRAM_BOT_TOKEN,
-        read_timeout=30,
-        write_timeout=30,
-        connect_timeout=30
-    ) as bot:
+    async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
         for post in posts:
             try:
                 await bot.send_message(
@@ -226,7 +217,7 @@ async def main():
                 )
 
                 print("🚀 پیام با موفقیت در کانال منتشر شد.")
-                await asyncio.sleep(3)
+                await asyncio.sleep(4)
 
             except TelegramError as error:
                 print(f"❌ خطای تلگرام هنگام ارسال: {error}")
