@@ -37,10 +37,11 @@ def convert_utc_to_tehran(utc_date_str):
         utc_dt = pytz.UTC.localize(utc_dt)
         tehran_dt = utc_dt.astimezone(pytz.timezone("Asia/Tehran"))
         
-        jalali_dt = jdatetime.Datetime.fromgregorian(datetime=tehran_dt)
+        jalali_dt = jdatetime.datetime.fromgregorian(datetime=tehran_dt)
         return jalali_dt.strftime("%Y/%m/%d  ⏰ %H:%M")
     except (ValueError, TypeError):
         return utc_date_str
+
 
 
 def get_team_form(team_id):
