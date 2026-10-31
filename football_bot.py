@@ -9,9 +9,9 @@ import requests
 from telegram import Bot
 from telegram.error import TelegramError
 
-# ==================== کلیدها (قرار داده‌شده مستقیماً در کد) ====================
-TELEGRAM_BOT_TOKEN = "9214310265:AAGUV7yYcmWWare4eTql2dzYoULFT89h310"
-FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71"
+# ==================== کلیدها ====================
+TELEGRAM_BOT_TOKEN = "9214310265:AAGUV7yYcmWWare4eTql2dzYoULFT89h310".strip()
+FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71".strip()
 
 CHANNEL_ID = "@footbal7079"
 
@@ -33,15 +33,32 @@ API_BASE_URL = "https://api.football-data.org/v4"
 def convert_utc_to_tehran(utc_date_str):
     """تبدیل زمان UTC مسابقه به زمان تهران و تاریخ شمسی."""
     try:
-        utc_dt = datetime.strptime(utc_date_str, "%Y-%m-%dT%H:%M:%SZ")
-        utc_dt = pytz.UTC.localize(utc_dt)
-        tehran_dt = utc_dt.astimezone(pytz.timezone("Asia/Tehran"))
-        
-        jalali_dt = jdatetime.datetime.fromgregorian(datetime=tehran_dt)
-        return jalali_dt.strftime("%Y/%m/%d  ⏰ %H:%M")
-    except (ValueError, TypeError):
-        return utc_date_str
+        # پشتیبانی از زمان‌هایی مثل ...Z و ...+00:00
+        date_str = utc_date_str.strip()
 
+        if date_str.endswith("Z"):
+            date_str = date_str[:-1] + "+00:00"
+
+        utc_dt = datetime.fromisoformat(date_str)
+
+        # اگر زمان منطقهٔ زمانی نداشت، آن را UTC در نظر بگیر
+        if utc_dt.tzinfo is None:
+            utc_dt = pytz.UTC.localize(utc_dt)
+        else:
+            utc_dt = utc_dt.astimezone(pytz.UTC)
+
+        tehran_tz = pytz.timezone("Asia/Tehran")
+        tehran_dt = utc_dt.astimezone(tehran_tz)
+
+        # تبدیل به datetime بدون timezone برای سازگاری با jdatetime
+        tehran_naive = tehran_dt.replace(tzinfo=None)
+        jalali_dt = jdatetime.datetime.fromgregorian(datetime=tehran_naive)
+
+        return jalali_dt.strftime("%Y/%m/%d  ⏰ %H:%M")
+
+    except (ValueError, TypeError, AttributeError) as error:
+        print(f"خطا در تبدیل تاریخ مسابقه {utc_date_str}: {error}")
+        return utc_date_str
 
 
 def get_team_form(team_id):
@@ -50,10 +67,16 @@ def get_team_form(team_id):
     params = {"status": "FINISHED", "limit": 5}
 
     try:
-        response = requests.get(url, headers=HEADERS, params=params, timeout=20)
+        response = requests.get(
+            url,
+            headers=HEADERS,
+            params=params,
+            timeout=20
+        )
+
         if response.status_code != 200:
             return "اطلاعاتی ثبت نشده"
-            
+
         matches = response.json().get("matches", [])
 
         matches = sorted(
@@ -63,6 +86,7 @@ def get_team_form(team_id):
         )
 
         form = []
+
         for match in matches[:5]:
             winner = match.get("score", {}).get("winner")
             home_id = match.get("homeTeam", {}).get("id")
@@ -91,6 +115,7 @@ def calculate_probabilities(home_form, away_form):
     draw_score = 3
 
     total = home_score + away_score + draw_score
+
     if total <= 0:
         return 33, 34, 33
 
@@ -110,11 +135,22 @@ def generate_match_posts():
         params = {"status": "SCHEDULED"}
 
         try:
-            response = requests.get(url, headers=HEADERS, params=params, timeout=20)
+            response = requests.get(
+                url,
+                headers=HEADERS,
+                params=params,
+                timeout=20
+            )
+
             if response.status_code != 200:
-                print(f"خطا در دریافت مسابقات {league_name}: کد {response.status_code}")
+                print(
+                    f"خطا در دریافت مسابقات {league_name}: "
+                    f"کد {response.status_code}"
+                )
                 continue
+
             matches = response.json().get("matches", [])
+
         except requests.RequestException as error:
             print(f"خطا در دریافت مسابقات {league_name}: {error}")
             continue
@@ -134,7 +170,10 @@ def generate_match_posts():
             time.sleep(3)
             away_form = get_team_form(away_id)
 
-            p_home, p_draw, p_away = calculate_probabilities(home_form, away_form)
+            p_home, p_draw, p_away = calculate_probabilities(
+                home_form,
+                away_form
+            )
 
             post = (
                 f"🏆 *{league_name}*\n"
@@ -179,6 +218,7 @@ async def main():
                     text=post,
                     parse_mode="Markdown",
                 )
+
                 print("🚀 پیام با موفقیت در کانال منتشر شد.")
                 await asyncio.sleep(3)
 
