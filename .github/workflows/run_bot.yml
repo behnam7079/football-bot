@@ -21,10 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install python-telegram-bot requests pytz
+          pip install -r requirements.txt
 
       - name: Run script
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          FOOTBALL_API_KEY: ${{ secrets.FOOTBALL_API_KEY }}
         run: python football_bot.py
