@@ -9,12 +9,22 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 
-# مقادیر این دو متغیر را در GitHub Actions به‌صورت Secrets تعریف کن.
-TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-FOOTBALL_API_KEY = os.environ["FOOTBALL_API_KEY"]
+# خواندن امن اطلاعات از متغیرهای محیطی (GitHub Secrets)
+TELEGRAM_BOT_TOKEN = os.environ["9214310265:AAGUv7yYcmWWare4eTql2dzYOuLFT89h3l0"]
+FOOTBALL_API_KEY = os.environ["2e7733d64c92451b871ddf1dfba3ff71"]
 
 CHANNEL_ID = "@footbal7079"
-LEAGUE_CODE = "PL"  # PL: لیگ برتر انگلیس
+
+# لیست لیگ‌هایی که می‌خواهید ربات بررسی کند
+LEAGUES = {
+    "PL": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 لیگ برتر انگلیس",
+    "SA": "🇮🇹 سری آ ایتالیا",
+    "BL1": "🇩🇪 بوندس‌لیگا آلمان",
+    "PD": "🇪🇸 لالیگا اسپانیا",
+    "FL1": "🇫🇷 لوشامپیونه فرانسه",
+    "CL": "🇪🇺 لیگ قهرمانان اروپا",
+    "EL": "🇪🇺 لیگ اروپا"
+}
 
 HEADERS = {"X-Auth-Token": FOOTBALL_API_KEY}
 API_BASE_URL = "https://api.football-data.org/v4"
@@ -43,7 +53,6 @@ def get_team_form(team_id):
         response.raise_for_status()
         matches = response.json().get("matches", [])
 
-        # API ممکن است مسابقه‌ها را از قدیمی به جدید برگرداند.
         matches = sorted(
             matches,
             key=lambda match: match.get("utcDate", ""),
@@ -90,67 +99,71 @@ def calculate_probabilities(home_form, away_form):
 
 
 def generate_match_posts():
-    """گرفتن بازی‌های آینده و ساخت متن پست‌ها."""
-    url = f"{API_BASE_URL}/competitions/{LEAGUE_CODE}/matches"
-    params = {"status": "SCHEDULED"}
+    """گرفتن بازی‌های آینده از تمام لیگ‌ها و ساخت پست‌ها."""
+    all_posts = []
 
-    try:
-        response = requests.get(
-            url, headers=HEADERS, params=params, timeout=20
-        )
-        response.raise_for_status()
-    except requests.RequestException as error:
-        print(f"خطا در دریافت مسابقات: {error}")
-        return []
+    for league_code, league_name in LEAGUES.items():
+        url = f"{API_BASE_URL}/competitions/{league_code}/matches"
+        params = {"status": "SCHEDULED"}
 
-    matches = response.json().get("matches", [])
-    matches.sort(key=lambda match: match.get("utcDate", ""))
+        try:
+            response = requests.get(
+                url, headers=HEADERS, params=params, timeout=20
+            )
+            if response.status_code != 200:
+                continue
+            matches = response.json().get("matches", [])
+        except requests.RequestException as error:
+            print(f"خطا در دریافت مسابقات {league_name}: {error}")
+            continue
 
-    posts = []
+        matches.sort(key=lambda match: match.get("utcDate", ""))
 
-    for match in matches[:3]:
-        home_team = match["homeTeam"]["name"]
-        away_team = match["awayTeam"]["name"]
-        home_id = match["homeTeam"]["id"]
-        away_id = match["awayTeam"]["id"]
-        match_time = convert_utc_to_tehran(match.get("utcDate", ""))
+        # از هر لیگ حداکثر 1 بازی مهم/نزدیک برداریم تا حجم پیام‌ها کنترل شود
+        for match in matches[:1]:
+            home_team = match["homeTeam"]["name"]
+            away_team = match["awayTeam"]["name"]
+            home_id = match["homeTeam"]["id"]
+            away_id = match["awayTeam"]["id"]
+            match_time = convert_utc_to_tehran(match.get("utcDate", ""))
 
-        time.sleep(1)
-        home_form = get_team_form(home_id)
+            time.sleep(1)
+            home_form = get_team_form(home_id)
 
-        time.sleep(1)
-        away_form = get_team_form(away_id)
+            time.sleep(1)
+            away_form = get_team_form(away_id)
 
-        p_home, p_draw, p_away = calculate_probabilities(
-            home_form, away_form
-        )
+            p_home, p_draw, p_away = calculate_probabilities(
+                home_form, away_form
+            )
 
-        post = (
-            "⚽️ *تحلیل و پیش‌بینی مسابقهٔ پیش‌رو*\n\n"
-            f"🏟 *{home_team}* 🆚 *{away_team}*\n"
-            "📅 زمان مسابقه (به وقت ایران):\n"
-            f"`{match_time}`\n\n"
-            "━━━━━━━━━━━━━━\n"
-            "📊 *برآورد آماری نتیجه:*\n"
-            f"🟢 برد {home_team}: `{p_home}%`\n"
-            f"⚪️ مساوی: `{p_draw}%`\n"
-            f"🔴 برد {away_team}: `{p_away}%`\n\n"
-            "━━━━━━━━━━━━━━\n"
-            "📈 *فرم پنج بازی گذشته:*\n"
-            f"▫️ {home_team}: {home_form}\n"
-            f"▫️ {away_team}: {away_form}\n"
-            "*(🟢 برد | ⚪️ مساوی | 🔴 باخت)*\n\n"
-            "━━━━━━━━━━━━━━\n"
-            f"🆔 {CHANNEL_ID}"
-        )
+            post = (
+                f"🏆 *{league_name}*\n"
+                "⚽️ *تحلیل و پیش‌بینی مسابقهٔ پیش‌رو*\n\n"
+                f"🏟 *{home_team}* 🆚 *{away_team}*\n"
+                "📅 زمان مسابقه (به وقت ایران):\n"
+                f"`{match_time}`\n\n"
+                "━━━━━━━━━━━━━━\n"
+                "📊 *برآورد آماری نتیجه:*\n"
+                f"🟢 برد {home_team}: `{p_home}%`\n"
+                f"⚪️ مساوی: `{p_draw}%`\n"
+                f"🔴 برد {away_team}: `{p_away}%`\n\n"
+                "━━━━━━━━━━━━━━\n"
+                "📈 *فرم پنج بازی گذشته:*\n"
+                f"▫️ {home_team}: {home_form}\n"
+                f"▫️ {away_team}: {away_form}\n"
+                "*(🟢 برد | ⚪️ مساوی | 🔴 باخت)*\n\n"
+                "━━━━━━━━━━━━━━\n"
+                f"🆔 {CHANNEL_ID}"
+            )
 
-        posts.append(post)
+            all_posts.append(post)
 
-    return posts
+    return all_posts
 
 
 async def main():
-    print("🔄 در حال دریافت فهرست مسابقات...")
+    print("🔄 در حال دریافت فهرست مسابقات لیگ‌های مختلف...")
     posts = generate_match_posts()
 
     if not posts:
@@ -172,12 +185,6 @@ async def main():
 
             except TelegramError as error:
                 print(f"❌ خطای تلگرام هنگام ارسال: {error}")
-
-                if "Unauthorized" in str(error):
-                    print(
-                        "توکن ربات نامعتبر است یا Secret "
-                        "TELEGRAM_BOT_TOKEN درست تنظیم نشده."
-                    )
 
 
 if __name__ == "__main__":
