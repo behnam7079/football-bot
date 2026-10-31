@@ -210,7 +210,13 @@ async def main():
 
     print(f"✅ {len(posts)} مسابقه دریافت شد؛ ارسال به کانال شروع می‌شود.")
 
-    async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
+    # اضافه شدن پارامترهای Timeout برای جلوگیری از خطای قطع ارتباط روی سرور گیت‌هاب
+    async with Bot(
+        token=TELEGRAM_BOT_TOKEN,
+        read_timeout=30,
+        write_timeout=30,
+        connect_timeout=30
+    ) as bot:
         for post in posts:
             try:
                 await bot.send_message(
