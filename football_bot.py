@@ -9,7 +9,7 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 # ==================== کلیدها (قرار داده‌شده مستقیماً در کد) ====================
-TELEGRAM_BOT_TOKEN = "9214310265:AAGUv7yYcmWWare4eTql2dzYoULFT89h310"
+TELEGRAM_BOT_TOKEN = "9214310265:AAGUv7yYcmWWare4eTql2dzYOuLFT89h3l0"
 FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71"
 
 CHANNEL_ID = "@footbal7079"
