@@ -47,7 +47,9 @@ def get_team_form(team_id):
 
     try:
         response = requests.get(url, headers=HEADERS, params=params, timeout=20)
-        response.raise_for_status()
+        if response.status_code != 200:
+            return "اطلاعاتی ثبت نشده"
+            
         matches = response.json().get("matches", [])
 
         matches = sorted(
@@ -106,6 +108,7 @@ def generate_match_posts():
         try:
             response = requests.get(url, headers=HEADERS, params=params, timeout=20)
             if response.status_code != 200:
+                print(f"خطا در دریافت مسابقات {league_name}: کد {response.status_code}")
                 continue
             matches = response.json().get("matches", [])
         except requests.RequestException as error:
@@ -121,10 +124,11 @@ def generate_match_posts():
             away_id = match["awayTeam"]["id"]
             match_time = convert_utc_to_tehran(match.get("utcDate", ""))
 
-            time.sleep(1)
+            # افزایش زمان مکث به ۳ ثانیه برای جلوگیری از خطای 429
+            time.sleep(3)
             home_form = get_team_form(home_id)
 
-            time.sleep(1)
+            time.sleep(3)
             away_form = get_team_form(away_id)
 
             p_home, p_draw, p_away = calculate_probabilities(home_form, away_form)
@@ -173,7 +177,7 @@ async def main():
                     parse_mode="Markdown",
                 )
                 print("🚀 پیام با موفقیت در کانال منتشر شد.")
-                await asyncio.sleep(2)
+                await asyncio.sleep(3)
 
             except TelegramError as error:
                 print(f"❌ خطای تلگرام هنگام ارسال: {error}")
