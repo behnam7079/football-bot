@@ -10,8 +10,8 @@ from telegram.error import TelegramError
 
 
 # خواندن امن اطلاعات از متغیرهای محیطی (GitHub Secrets)
-TELEGRAM_BOT_TOKEN = os.environ["9214310265:AAGUv7yYcmWWare4eTql2dzYOuLFT89h3l0"]
-FOOTBALL_API_KEY = os.environ["2e7733d64c92451b871ddf1dfba3ff71"]
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+FOOTBALL_API_KEY = os.environ["FOOTBALL_API_KEY"]
 
 CHANNEL_ID = "@footbal7079"
 
