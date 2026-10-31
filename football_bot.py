@@ -8,14 +8,13 @@ import requests
 from telegram import Bot
 from telegram.error import TelegramError
 
-
-# خواندن امن اطلاعات از متغیرهای محیطی (GitHub Secrets)
-TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-FOOTBALL_API_KEY = os.environ["FOOTBALL_API_KEY"]
+# ==================== کلیدها (قرار داده‌شده مستقیماً در کد) ====================
+TELEGRAM_BOT_TOKEN = "9214310265:AAGUv7yYcmWWare4eTql2dzYoULFT89h310"
+FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71"
 
 CHANNEL_ID = "@footbal7079"
 
-# لیست لیگ‌هایی که می‌خواهید ربات بررسی کند
+# لیست لیگ‌ها
 LEAGUES = {
     "PL": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 لیگ برتر انگلیس",
     "SA": "🇮🇹 سری آ ایتالیا",
@@ -47,9 +46,7 @@ def get_team_form(team_id):
     params = {"status": "FINISHED", "limit": 5}
 
     try:
-        response = requests.get(
-            url, headers=HEADERS, params=params, timeout=20
-        )
+        response = requests.get(url, headers=HEADERS, params=params, timeout=20)
         response.raise_for_status()
         matches = response.json().get("matches", [])
 
@@ -82,7 +79,7 @@ def get_team_form(team_id):
 
 
 def calculate_probabilities(home_form, away_form):
-    """یک برآورد ساده بر پایهٔ فرم اخیر و امتیاز میزبانی."""
+    """برآورد ساده بر پایهٔ فرم اخیر."""
     home_score = home_form.count("🟢") * 3 + home_form.count("⚪️") + 2
     away_score = away_form.count("🟢") * 3 + away_form.count("⚪️")
     draw_score = 3
@@ -107,9 +104,7 @@ def generate_match_posts():
         params = {"status": "SCHEDULED"}
 
         try:
-            response = requests.get(
-                url, headers=HEADERS, params=params, timeout=20
-            )
+            response = requests.get(url, headers=HEADERS, params=params, timeout=20)
             if response.status_code != 200:
                 continue
             matches = response.json().get("matches", [])
@@ -119,7 +114,6 @@ def generate_match_posts():
 
         matches.sort(key=lambda match: match.get("utcDate", ""))
 
-        # از هر لیگ حداکثر 1 بازی مهم/نزدیک برداریم تا حجم پیام‌ها کنترل شود
         for match in matches[:1]:
             home_team = match["homeTeam"]["name"]
             away_team = match["awayTeam"]["name"]
@@ -133,9 +127,7 @@ def generate_match_posts():
             time.sleep(1)
             away_form = get_team_form(away_id)
 
-            p_home, p_draw, p_away = calculate_probabilities(
-                home_form, away_form
-            )
+            p_home, p_draw, p_away = calculate_probabilities(home_form, away_form)
 
             post = (
                 f"🏆 *{league_name}*\n"
