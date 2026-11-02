@@ -10,8 +10,8 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 # ==================== کلیدها و تنظیمات ====================
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "9214310265:AAENQk-mVivaBSsS0TfWeDk3XJ1FGc37-Gg").strip()
-FOOTBALL_API_KEY = os.environ.get("FOOTBALL_API_KEY", "2e7733d64c92451b871ddf1dfba3ff71").strip()
+TELEGRAM_BOT_TOKEN = "9214310265:AAENQk-mVivaBSsS0TfWeDk3XJ1FGc37-Gg".strip()
+FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71".strip()
 
 # در صورت ثبت‌نام در api-football.com کلید آن را اینجا یا در Secrets گیت‌هاب بگذارید (اختیاری)
 API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY", "").strip()
