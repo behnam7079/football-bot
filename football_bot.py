@@ -14,7 +14,7 @@ TELEGRAM_BOT_TOKEN = "9214310265:AAENQk-mVivaBSsS0TfWeDk3XJ1FGc37-Gg".strip()
 FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71".strip()
 
 # در صورت ثبت‌نام در api-football.com کلید آن را اینجا یا در Secrets گیت‌هاب بگذارید (اختیاری)
-API_FOOTBALL_KEY = os.environ.get("API_FOOTBALL_KEY", "").strip()
+API_FOOTBALL_KEY = "35e40e3c03a67c55038905a33c06c74b".strip()
 
 CHANNEL_ID = "@footbal7079"
 
