@@ -1,7 +1,7 @@
 import asyncio
 import os
 import time
-from datetime import datetime
+from datetime import datetime, date
 
 import jdatetime
 import pytz
@@ -10,12 +10,13 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 # ==================== کلیدها ====================
+# در گیت‌هاب از متغیرهای محیطی (Secrets) خوانده می‌شود
 TELEGRAM_BOT_TOKEN = "9214310265:AAENQk-mVivaBSsS0TfWeDk3XJ1FGc37-Gg".strip()
 FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71".strip()
 
 CHANNEL_ID = "@footbal7079"
 
-# لیست لیگ‌ها
+# لیست لیگ‌ها (در پلن رایگان football-data.org)
 LEAGUES = {
     "PL": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 لیگ برتر انگلیس",
     "SA": "🇮🇹 سری آ ایتالیا",
@@ -28,6 +29,13 @@ LEAGUES = {
 
 HEADERS = {"X-Auth-Token": FOOTBALL_API_KEY}
 API_BASE_URL = "https://api.football-data.org/v4"
+
+
+def get_today_tehran_date_str():
+    """تاریخ امروز به فرمت YYYY-MM-DD به وقت ایران برای فیلتر API"""
+    tehran_tz = pytz.timezone("Asia/Tehran")
+    tehran_now = datetime.now(tehran_tz)
+    return tehran_now.strftime("%Y-%m-%d")
 
 
 def convert_utc_to_tehran(utc_date_str):
@@ -50,11 +58,11 @@ def convert_utc_to_tehran(utc_date_str):
         tehran_naive = tehran_dt.replace(tzinfo=None)
         jalali_dt = jdatetime.datetime.fromgregorian(datetime=tehran_naive)
 
-        return jalali_dt.strftime("%Y/%m/%d  ⏰ %H:%M")
+        return jalali_dt.strftime("%Y/%m/%d"), tehran_dt.strftime("%H:%M")
 
     except (ValueError, TypeError, AttributeError) as error:
         print(f"خطا در تبدیل تاریخ مسابقه {utc_date_str}: {error}")
-        return utc_date_str
+        return "", utc_date_str
 
 
 def get_team_form(team_id):
@@ -63,22 +71,12 @@ def get_team_form(team_id):
     params = {"status": "FINISHED", "limit": 5}
 
     try:
-        response = requests.get(
-            url,
-            headers=HEADERS,
-            params=params,
-            timeout=20
-        )
-
+        response = requests.get(url, headers=HEADERS, params=params, timeout=20)
         if response.status_code != 200:
             return "اطلاعاتی ثبت نشده"
 
         matches = response.json().get("matches", [])
-        matches = sorted(
-            matches,
-            key=lambda match: match.get("utcDate", ""),
-            reverse=True,
-        )
+        matches = sorted(matches, key=lambda match: match.get("utcDate", ""), reverse=True)
 
         form = []
         for match in matches[:5]:
@@ -87,10 +85,7 @@ def get_team_form(team_id):
 
             if winner == "DRAW":
                 form.append("⚪️")
-            elif (
-                (winner == "HOME_TEAM" and home_id == team_id)
-                or (winner == "AWAY_TEAM" and home_id != team_id)
-            ):
+            elif (winner == "HOME_TEAM" and home_id == team_id) or (winner == "AWAY_TEAM" and home_id != team_id):
                 form.append("🟢")
             else:
                 form.append("🔴")
@@ -120,20 +115,22 @@ def calculate_probabilities(home_form, away_form):
 
 
 def generate_match_posts():
-    """گرفتن بازی‌های آینده از تمام لیگ‌ها و ساخت پست‌ها."""
+    """گرفتن فقط بازی‌های 'امروز' از تمام لیگ‌ها و ساخت پست‌ها."""
     all_posts = []
+    today_date_str = get_today_tehran_date_str()
+    print(f"📅 فیلتر بازی‌ها برای تاریخ امروز (به وقت ایران): {today_date_str}")
 
     for league_code, league_name in LEAGUES.items():
+        # درخواست مستقیم بازی‌های امروز از API با استفاده از بازه تاریخ
         url = f"{API_BASE_URL}/competitions/{league_code}/matches"
-        params = {"status": "SCHEDULED"}
+        params = {
+            "dateFrom": today_date_str,
+            "dateTo": today_date_str,
+            "status": "SCHEDULED"
+        }
 
         try:
-            response = requests.get(
-                url,
-                headers=HEADERS,
-                params=params,
-                timeout=20
-            )
+            response = requests.get(url, headers=HEADERS, params=params, timeout=20)
 
             if response.status_code == 429:
                 print(f"⚠️ خطای ۴۲۹ (محدودیت درخواست) برای {league_name}؛ توقف کوتاه‌مدت...")
@@ -149,32 +146,33 @@ def generate_match_posts():
             print(f"خطا در ارتباط با سرور برای {league_name}: {error}")
             continue
 
+        if not matches:
+            continue
+
+        # مرتب‌سازی بازی‌های امروز بر اساس ساعت
         matches.sort(key=lambda match: match.get("utcDate", ""))
 
-        for match in matches[:1]:
+        for match in matches:
             home_team = match["homeTeam"]["name"]
             away_team = match["awayTeam"]["name"]
             home_id = match["homeTeam"]["id"]
             away_id = match["awayTeam"]["id"]
-            match_time = convert_utc_to_tehran(match.get("utcDate", ""))
+            
+            jalali_date, match_time = convert_utc_to_tehran(match.get("utcDate", ""))
 
-            time.sleep(4)
+            time.sleep(3)
             home_form = get_team_form(home_id)
 
-            time.sleep(4)
+            time.sleep(3)
             away_form = get_team_form(away_id)
 
-            p_home, p_draw, p_away = calculate_probabilities(
-                home_form,
-                away_form
-            )
+            p_home, p_draw, p_away = calculate_probabilities(home_form, away_form)
 
             post = (
                 f"🏆 *{league_name}*\n"
-                "⚽️ *تحلیل و پیش‌بینی مسابقهٔ پیش‌رو*\n\n"
+                "⚽️ *تحلیل و پیش‌بینی مسابقهٔ امروز*\n\n"
                 f"🏟 *{home_team}* 🆚 *{away_team}*\n"
-                "📅 زمان مسابقه (به وقت ایران):\n"
-                f"`{match_time}`\n\n"
+                f"📅 تاریخ: `{jalali_date}` | ⏰ ساعت: `{match_time}`\n\n"
                 "━━━━━━━━━━━━━━\n"
                 "📊 *برآورد آماری نتیجه:*\n"
                 f"🟢 برد {home_team}: `{p_home}%`\n"
@@ -191,21 +189,20 @@ def generate_match_posts():
 
             all_posts.append(post)
 
-        # مکث بین درخواست لیگ‌ها برای جلوگیری از خطای ۴۲۹
-        time.sleep(5)
+        time.sleep(3)
 
     return all_posts
 
 
 async def main():
-    print("🔄 در حال دریافت فهرست مسابقات لیگ‌های مختلف...")
+    print("🔄 در حال بررسی و دریافت مسابقات امروز...")
     posts = generate_match_posts()
 
     if not posts:
-        print("⚠️ مسابقهٔ آینده‌ای برای انتشار پیدا نشد یا درخواست‌ها محدود شدند.")
+        print("⚠️ امشب یا امروز مسابقه‌ای در لیگ‌های منتخب برنامه‌ریزی نشده است.")
         return
 
-    print(f"✅ {len(posts)} مسابقه دریافت شد؛ ارسال به کانال شروع می‌شود.")
+    print(f"✅ {len(posts)} مسابقه برای امروز پیدا شد؛ ارسال به کانال...")
 
     async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
         for post in posts:
@@ -215,8 +212,7 @@ async def main():
                     text=post,
                     parse_mode="Markdown",
                 )
-
-                print("🚀 پیام با موفقیت در کانال منتشر شد.")
+                print("🚀 پیام بازی با موفقیت ارسال شد.")
                 await asyncio.sleep(4)
 
             except TelegramError as error:
