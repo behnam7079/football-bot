@@ -24,7 +24,6 @@ BASE_URL_AF = "https://v3.football.api-sports.io"
 NO_FORM = "اطلاعاتی ثبت نشده"
 
 
-# لیگ‌های اروپایی؛ منبع: football-data.org
 EUROPE_LEAGUES = {
     "PL": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 لیگ برتر انگلیس",
     "SA": "🇮🇹 سری آ ایتالیا",
@@ -35,13 +34,11 @@ EUROPE_LEAGUES = {
     "EL": "🇪🇺 لیگ اروپا",
 }
 
-# لیگ‌های ایران و آسیا؛ منبع: API-Sports
 ASIAN_AND_IRAN_LEAGUES = {
     290: "🇮🇷 لیگ برتر ایران",
     17: "🌏 لیگ نخبگان آسیا",
 }
 
-# جام‌های حذفی؛ منبع: API-Sports
 DOMESTIC_CUPS = {
     495: "🇮🇷 جام حذفی ایران",
     45: "🏴󠁧󠁢󠁥󠁮󠁧󠁿 جام حذفی انگلیس (FA Cup)",
@@ -66,12 +63,9 @@ def jalali_date_of(day):
 
 
 def parse_datetime(date_text):
-    """تاریخ API را به یک زمان دارای منطقهٔ زمانی تبدیل می‌کند."""
     moment = datetime.fromisoformat(date_text.strip().replace("Z", "+00:00"))
-
     if moment.tzinfo is None:
         moment = pytz.UTC.localize(moment)
-
     return moment
 
 
@@ -81,7 +75,6 @@ def convert_to_tehran(date_text):
 
 
 def fd_request(url, params, label):
-    """درخواست football-data.org؛ خطا را در لاگ نشان می‌دهد."""
     for attempt in range(2):
         try:
             response = requests.get(
@@ -90,33 +83,18 @@ def fd_request(url, params, label):
                 params=params,
                 timeout=20,
             )
-
             if response.status_code == 429 and attempt == 0:
-                print(f"⚠️ محدودیت موقت football-data.org برای {label}؛ ۶۵ ثانیه صبر")
                 time.sleep(65)
                 continue
-
             if response.status_code != 200:
-                print(
-                    f"❌ football-data.org / {label}: "
-                    f"HTTP {response.status_code}"
-                )
                 return None
-
             return response.json()
-
-        except (requests.RequestException, ValueError) as exc:
-            print(f"❌ football-data.org / {label}: {exc}")
+        except Exception:
             return None
-
     return None
 
 
 def as_request(params, label):
-    """
-    درخواست API-Sports.
-    None یعنی خطا؛ فهرست خالی یعنی درخواست موفق اما بدون مسابقه.
-    """
     try:
         response = requests.get(
             f"{BASE_URL_AF}/fixtures",
@@ -124,58 +102,15 @@ def as_request(params, label):
             params=params,
             timeout=30,
         )
-
-        remaining = response.headers.get(
-            "x-ratelimit-requests-remaining", "نامشخص"
-        )
-
-        try:
-            data = response.json()
-        except ValueError:
-            print(
-                f"❌ API-Sports / {label}: HTTP {response.status_code}؛ "
-                "پاسخ JSON معتبر نیست"
-            )
+        data = response.json()
+        if response.status_code != 200 or data.get("errors"):
             return None
-
-        errors = data.get("errors") if isinstance(data, dict) else None
-
-        if response.status_code != 200 or errors:
-            # اگر متن خطا اتفاقاً حاوی کلید بود، کلید در لاگ چاپ نشود.
-            error_text = str(errors).replace(
-                API_FOOTBALL_KEY, "[REDACTED]"
-            )
-            print(
-                f"❌ API-Sports / {label}: HTTP {response.status_code}؛ "
-                f"errors={error_text}؛ سهمیهٔ باقی‌مانده={remaining}"
-            )
-            return None
-
-        matches = data.get("response")
-        if not isinstance(matches, list):
-            print(
-                f"❌ API-Sports / {label}: "
-                "فهرست response در پاسخ موجود نیست"
-            )
-            return None
-
-        print(
-            f"🔎 API-Sports / {label}: HTTP 200؛ "
-            f"results={data.get('results')}؛ "
-            f"سهمیهٔ باقی‌مانده={remaining}"
-        )
-        return matches
-
-    except requests.RequestException as exc:
-        print(f"❌ API-Sports / {label}: خطای اتصال: {exc}")
+        return data.get("response", [])
+    except Exception:
         return None
 
 
 def match_form_record(match, team_id, source):
-    """
-    نتیجهٔ یک بازی را برای تیم موردنظر برمی‌گرداند:
-    (نماد نتیجه، اختلاف گل از دید تیم)
-    """
     if source == "as":
         fixture = match.get("fixture") or {}
         if (fixture.get("status") or {}).get("short") not in (
@@ -197,11 +132,8 @@ def match_form_record(match, team_id, source):
             winner = "home"
         elif away.get("winner") is True:
             winner = "away"
-        elif home.get("winner") is False and away.get("winner") is False:
-            winner = "draw"
         else:
             winner = None
-
     else:
         if match.get("status") != "FINISHED":
             return None
@@ -230,7 +162,6 @@ def match_form_record(match, team_id, source):
             away_goals, int
         ):
             return None
-
         if home_goals > away_goals:
             winner = "home"
         elif away_goals > home_goals:
@@ -260,7 +191,6 @@ def match_form_record(match, team_id, source):
 
 
 def extract_team_form(matches, team_id, kickoff, source):
-    """حداکثر پنج بازی معتبرِ پیش از شروع مسابقه را انتخاب می‌کند."""
     date_key = "date" if source == "as" else "utcDate"
 
     def get_date(match):
@@ -269,91 +199,73 @@ def extract_team_form(matches, team_id, kickoff, source):
         return match.get(date_key) or ""
 
     form = []
-
     for match in sorted(matches, key=get_date, reverse=True):
         date_text = get_date(match)
         if not date_text:
             continue
-
         try:
             if parse_datetime(date_text) >= kickoff:
                 continue
-        except (TypeError, ValueError):
+        except Exception:
             continue
 
         record = match_form_record(match, team_id, source)
         if record is not None:
             form.append(record)
-
         if len(form) == 5:
             break
-
     return form
 
 
 def get_team_form_fd(team_id, kickoff):
     if not team_id:
-        print("⚠️ football-data.org: شناسهٔ تیم موجود نیست")
         return []
-
     data = fd_request(
         f"{BASE_URL_FD}/teams/{team_id}/matches",
         {"status": "FINISHED", "limit": 20},
         f"فرم تیم {team_id}",
     )
-
     if not isinstance(data, dict):
         return []
-
-    matches = data.get("matches")
-    if not isinstance(matches, list):
-        print(f"❌ football-data.org: فهرست بازی‌های تیم {team_id} موجود نیست")
-        return []
-
-    form = extract_team_form(matches, team_id, kickoff, "fd")
-    print(f"📈 football-data.org: تیم {team_id}؛ {len(form)} بازی معتبر")
-    return form
+    return extract_team_form(data.get("matches", []), team_id, kickoff, "fd")
 
 
 def get_team_form_as(team_id, kickoff, cache):
     if not team_id:
-        print("⚠️ API-Sports: شناسهٔ تیم موجود نیست")
         return []
 
-    # بازی‌های دریافتی هر تیم در همین اجرای ربات دوباره درخواست نمی‌شوند.
+    # استفاده از season و team به جای پارامتر last که در پلن رایگان بسته است
     if team_id not in cache:
-        cache[team_id] = as_request(
-            {"team": team_id, "last": 30},
-            f"فرم تیم {team_id}",
-        )
-        time.sleep(2)
+        current_year = datetime.now().year
+        # بررسی سال جاری و سال قبل برای پوشش کامل مسابقات اخیر
+        all_matches = []
+        for season in [current_year, current_year - 1]:
+            res = as_request(
+                {"team": team_id, "season": season, "status": "FT"},
+                f"فرم تیم {team_id} فصل {season}",
+            )
+            if res:
+                all_matches.extend(res)
+            time.sleep(1)
+        cache[team_id] = all_matches
 
     matches = cache[team_id]
-    if matches is None:
+    if not matches:
         return []
 
-    form = extract_team_form(matches, team_id, kickoff, "as")
-    print(f"📈 API-Sports: تیم {team_id}؛ {len(form)} بازی معتبر")
-    return form
+    return extract_team_form(matches, team_id, kickoff, "as")
 
 
 def format_form(form):
     if not form:
         return NO_FORM
-
     symbols = " ".join(result for result, _ in form)
-
     if len(form) < 5:
-        return f"{symbols} (فقط {len(form)} بازی معتبر در دسترس)"
-
+        return f"{symbols} (فقط {len(form)} بازی معتبر)"
     return symbols
 
 
 def calculate_probabilities(home_form, away_form):
-    """
-    تخمین ساده بر اساس پنج نتیجهٔ اخیر، اختلاف گل و امتیاز میزبانی.
-    این خروجی احتمال آماریِ تضمین‌شده یا پیش‌بینی رسمی API نیست.
-    """
     if len(home_form) != 5 or len(away_form) != 5:
         return None
 
@@ -362,54 +274,25 @@ def calculate_probabilities(home_form, away_form):
             3 if result == "🟢" else 1 if result == "⚪️" else 0
             for result, _ in form
         )
-        known_goal_differences = [
-            difference
-            for _, difference in form
-            if difference is not None
-        ]
-
-        points_per_match = points / 5
-
-        if known_goal_differences:
-            average_goal_difference = (
-                sum(known_goal_differences)
-                / len(known_goal_differences)
-            )
-        else:
-            average_goal_difference = 0
-
-        # اثر اختلاف گل محدود می‌شود تا یک بازی غیرعادی غلبه نکند.
-        average_goal_difference = max(
-            -2, min(2, average_goal_difference)
-        )
-
-        score = (
-            1
-            + points_per_match
-            + 0.3 * average_goal_difference
-        )
-        return max(0.1, score), points_per_match
+        diffs = [d for _, d in form if d is not None]
+        ppg = points / 5
+        avg_diff = sum(diffs) / len(diffs) if diffs else 0
+        avg_diff = max(-2, min(2, avg_diff))
+        score = 1 + ppg + 0.3 * avg_diff
+        return max(0.1, score), ppg
 
     home_strength, home_ppg = strength(home_form)
     away_strength, away_ppg = strength(away_form)
 
     home_strength += 0.3
-    draw_strength = 1.6 - 0.2 * min(
-        2, abs(home_ppg - away_ppg)
-    )
+    draw_strength = 1.6 - 0.2 * min(2, abs(home_ppg - away_ppg))
 
     total = home_strength + draw_strength + away_strength
-    home_percentage = round(100 * home_strength / total)
-    draw_percentage = round(100 * draw_strength / total)
-    away_percentage = (
-        100 - home_percentage - draw_percentage
-    )
+    home_pct = round(100 * home_strength / total)
+    draw_pct = round(100 * draw_strength / total)
+    away_pct = 100 - home_pct - draw_pct
 
-    return (
-        home_percentage,
-        draw_percentage,
-        away_percentage,
-    )
+    return home_pct, draw_pct, away_pct
 
 
 def build_post(
@@ -428,8 +311,7 @@ def build_post(
 
     if probabilities is None:
         prediction_text = (
-            "⚠️ برای محاسبهٔ برآورد، پنج بازی معتبر "
-            "برای هر دو تیم دریافت نشد."
+            "⚠️ اطلاعات کافی از ۵ بازی اخیر برای محاسبه درصدی ثبت نشده است."
         )
     else:
         p_home, p_draw, p_away = probabilities
@@ -471,47 +353,34 @@ def fetch_european_matches():
             {"dateFrom": date_from, "dateTo": date_to},
             f"مسابقات {code}",
         )
-
         if not isinstance(data, dict):
             continue
 
         selected = []
-
-        for match in data.get("matches") or []:
+        for match in data.get("matches", []):
             if match.get("status") not in ("SCHEDULED", "TIMED"):
                 continue
-
             try:
                 kickoff = parse_datetime(match["utcDate"])
-                match_date, match_time = convert_to_tehran(
-                    match["utcDate"]
-                )
-            except (KeyError, TypeError, ValueError):
+                match_date, match_time = convert_to_tehran(match["utcDate"])
+            except Exception:
                 continue
 
             if match_date == today_jalali:
-                selected.append(
-                    (match_time, match, match_date, kickoff)
-                )
+                selected.append((match_time, match, match_date, kickoff))
 
         selected.sort(key=lambda entry: entry[0])
         if not selected:
             continue
 
         posts = []
-
         for match_time, match, match_date, kickoff in selected:
             home = match.get("homeTeam") or {}
             away = match.get("awayTeam") or {}
 
-            home_form = get_team_form_fd(
-                home.get("id"), kickoff
-            )
+            home_form = get_team_form_fd(home.get("id"), kickoff)
             time.sleep(2)
-
-            away_form = get_team_form_fd(
-                away.get("id"), kickoff
-            )
+            away_form = get_team_form_fd(away.get("id"), kickoff)
             time.sleep(2)
 
             posts.append(
@@ -536,21 +405,15 @@ def fetch_api_sports_matches():
     today_jalali = jalali_date_of(today)
 
     fixtures = as_request(
-        {
-            "date": today.isoformat(),
-            "timezone": "Asia/Tehran",
-        },
+        {"date": today.isoformat(), "timezone": "Asia/Tehran"},
         "مسابقات امروز",
     )
-
     if fixtures is None:
         return {}
 
     selected = []
-
     for item in fixtures:
         league_id = (item.get("league") or {}).get("id")
-
         if league_id not in API_SPORTS_COMPETITIONS:
             continue
 
@@ -560,22 +423,12 @@ def fetch_api_sports_matches():
 
         try:
             kickoff = parse_datetime(fixture["date"])
-            match_date, match_time = convert_to_tehran(
-                fixture["date"]
-            )
-        except (KeyError, TypeError, ValueError):
+            match_date, match_time = convert_to_tehran(fixture["date"])
+        except Exception:
             continue
 
         if match_date == today_jalali:
-            selected.append(
-                (
-                    league_id,
-                    match_time,
-                    match_date,
-                    kickoff,
-                    item,
-                )
-            )
+            selected.append((league_id, match_time, match_date, kickoff, item))
 
     selected.sort(key=lambda entry: entry[1])
 
@@ -587,12 +440,8 @@ def fetch_api_sports_matches():
         home_team = teams.get("home") or {}
         away_team = teams.get("away") or {}
 
-        home_form = get_team_form_as(
-            home_team.get("id"), kickoff, team_cache
-        )
-        away_form = get_team_form_as(
-            away_team.get("id"), kickoff, team_cache
-        )
+        home_form = get_team_form_as(home_team.get("id"), kickoff, team_cache)
+        away_form = get_team_form_as(away_team.get("id"), kickoff, team_cache)
 
         competition_name = API_SPORTS_COMPETITIONS[league_id]
         post = build_post(
@@ -605,9 +454,7 @@ def fetch_api_sports_matches():
             away_form,
         )
 
-        posts_by_competition.setdefault(
-            competition_name, []
-        ).append(post)
+        posts_by_competition.setdefault(competition_name, []).append(post)
 
     return posts_by_competition
 
@@ -616,27 +463,13 @@ async def safe_send_message(bot, chat_id, text, parse_mode="HTML"):
     while True:
         try:
             await bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode=parse_mode,
+                chat_id=chat_id, text=text, parse_mode=parse_mode
             )
             return True
-
         except RetryAfter as exc:
-            wait = exc.retry_after
-
-            if isinstance(wait, timedelta):
-                wait = wait.total_seconds()
-
-            wait_seconds = max(0, float(wait)) + 2
-            print(
-                f"⏳ محدودیت تلگرام؛ "
-                f"{wait_seconds:.0f} ثانیه صبر و تلاش مجدد"
-            )
-            await asyncio.sleep(wait_seconds)
-
-        except TelegramError as exc:
-            print(f"❌ خطا در ارسال پیام تلگرام: {exc}")
+            wait = float(exc.retry_after.total_seconds()) if isinstance(exc.retry_after, timedelta) else float(exc.retry_after)
+            await asyncio.sleep(max(0, wait) + 2)
+        except TelegramError:
             return False
 
 
@@ -647,37 +480,23 @@ async def main():
     posts_by_league.update(fetch_api_sports_matches())
 
     if not posts_by_league:
-        print(
-            "⚠️ مسابقهٔ شروع‌نشده‌ای پیدا نشد، "
-            "یا دریافت اطلاعات مسابقات با خطا روبه‌رو شد؛ "
-            "لاگ‌های بالا را بررسی کن."
-        )
+        print("⚠️ مسابقهٔ شروع‌نشده‌ای پیدا نشد.")
         return
 
     async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
         for competition_name, posts in posts_by_league.items():
-            print(
-                f"📌 ارسال {competition_name}: "
-                f"{len(posts)} بازی"
-            )
-
+            print(f"📌 ارسال {competition_name}: {len(posts)} بازی")
             header_sent = await safe_send_message(
                 bot,
                 CHANNEL_ID,
-                (
-                    "📢 <b>بازی‌های امروز در "
-                    f"{escape(competition_name)}</b>"
-                ),
+                f"📢 <b>بازی‌های امروز در {escape(competition_name)}</b>",
             )
-
             if not header_sent:
                 continue
 
             for post in posts:
                 await asyncio.sleep(3)
-                await safe_send_message(
-                    bot, CHANNEL_ID, post
-                )
+                await safe_send_message(bot, CHANNEL_ID, post)
 
     print("🏁 ارسال بازی‌های یافت‌شده تمام شد.")
 
