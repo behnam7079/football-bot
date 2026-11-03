@@ -9,9 +9,9 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 # ==================== کلیدها و تنظیمات ====================
-TELEGRAM_BOT_TOKEN = "9214310265:AAGUv7yYcmWWare4eTql2dzYOuLFT89h3l0".strip()
-FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71".strip()
-API_FOOTBALL_KEY = "35e40e3c03a67c55038905a33c06c74b".strip()
+TELEGRAM_BOT_TOKEN = "9214310265:AAGUv7yYcmWWare4eTql2dzYOuLFT89h3l0"
+FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71"
+API_FOOTBALL_KEY = "35e40e3c03a67c55038905a33c06c74b"
 
 CHANNEL_ID = "@footbal7079"
 
