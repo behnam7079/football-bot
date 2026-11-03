@@ -10,9 +10,9 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 # ==================== کلیدها و تنظیمات ====================
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "9214310265:AAENQk-mVivaBSsS0TfWeDk3XJ1FGc37-Gg").strip()
-FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY", "2e7733d64c92451b871ddf1dfba3ff71").strip()
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "35e40e3c03a67c55038905a33c06c74b").strip()
+TELEGRAM_BOT_TOKEN = "9214310265:AAENQk-mVivaBSsS0TfWeDk3XJ1FGc37-Gg"
+FOOTBALL_API_KEY = "FOOTBALL_API_KEY", "2e7733d64c92451b871ddf1dfba3ff71"
+API_FOOTBALL_KEY = "API_FOOTBALL_KEY", "35e40e3c03a67c55038905a33c06c74b"
 
 CHANNEL_ID = "@footbal7079"
 
@@ -28,10 +28,6 @@ EUROPE_LEAGUES = {
 }
 
 # لیگ‌های ایران، آسیا و جام‌های حذفی (api-football.com)
-# شناسه ۶۶: جام حذفی فرانسه (Coupe de France)
-# شناسه ۴۹۵: جام حذفی ایران (Hazfi Cup)
-# شناسه ۲۹۰: لیگ برتر ایران
-# شناسه ۱۷: لیگ نخبگان آسیا
 ASIAN_LEAGUES = {
     290: "🇮🇷 لیگ برتر ایران",
     495: "🇮🇷 جام حذفی ایران",
@@ -83,11 +79,15 @@ def convert_utc_to_tehran(utc_date_str):
 
 
 def get_team_form_fd(team_id):
-    """دریافت فرم ۵ بازی اخیر تیم از football-data.org"""
+    """دریافت فرم ۵ بازی اخیر تیم از football-data.org با مدیریت درخواست‌ها"""
     url = f"{BASE_URL_FD}/teams/{team_id}/matches"
     params = {"status": "FINISHED", "limit": 5}
     try:
         response = requests.get(url, headers=HEADERS_FD, params=params, timeout=15)
+        if response.status_code == 429:
+            time.sleep(12)  # مکث برای جلوگیری از بلاک شدن لیمیت
+            response = requests.get(url, headers=HEADERS_FD, params=params, timeout=15)
+        
         if response.status_code != 200:
             return "اطلاعاتی ثبت نشده"
 
@@ -128,13 +128,14 @@ def calculate_probabilities(home_form, away_form):
 
 
 def fetch_european_matches():
-    """دریافت بازی‌های امروز لیگ‌های اروپایی و تفکیک بر اساس لیگ"""
+    """دریافت بازی‌های امروز لیگ‌های اروپایی با رعایت محدودیت نرخ درخواست"""
     league_posts = {}
     today_jalali = get_tehran_today_str()
     
-    today_utc = datetime.utcnow()
-    date_from = today_utc.strftime("%Y-%m-%d")
-    date_to = (today_utc + timedelta(days=1)).strftime("%Y-%m-%d")
+    tehran_tz = pytz.timezone("Asia/Tehran")
+    today_tehran = datetime.now(tehran_tz)
+    date_from = today_tehran.strftime("%Y-%m-%d")
+    date_to = (today_tehran + timedelta(days=1)).strftime("%Y-%m-%d")
 
     for league_code, league_name in EUROPE_LEAGUES.items():
         url = f"{BASE_URL_FD}/competitions/{league_code}/matches"
@@ -143,13 +144,17 @@ def fetch_european_matches():
         try:
             res = requests.get(url, headers=HEADERS_FD, params=params, timeout=20)
             if res.status_code == 429:
-                time.sleep(10)
-                continue
+                print(f"⚠️ لیمیت درخواست برای لیگ {league_name}، مکث ۱۵ ثانیه‌ای...")
+                time.sleep(15)
+                res = requests.get(url, headers=HEADERS_FD, params=params, timeout=20)
+            
             if res.status_code != 200:
+                print(f"خطا در دریافت لیگ {league_name}: استاتوس کد {res.status_code}")
                 continue
 
             matches = res.json().get("matches", [])
-        except Exception:
+        except Exception as e:
+            print(f"خطا در ارتباط با لیگ {league_name}: {e}")
             continue
 
         valid_matches = []
@@ -162,6 +167,7 @@ def fetch_european_matches():
                 valid_matches.append((match, jalali_date, match_time))
 
         if not valid_matches:
+            time.sleep(3)
             continue
 
         valid_matches.sort(key=lambda item: item[2])
@@ -173,9 +179,9 @@ def fetch_european_matches():
             home_id = match["homeTeam"]["id"]
             away_id = match["awayTeam"]["id"]
 
-            time.sleep(1.5)
+            time.sleep(2)  # مکث برای جلوگیری از اتمام لیمیت
             h_form = get_team_form_fd(home_id)
-            time.sleep(1.5)
+            time.sleep(2)
             a_form = get_team_form_fd(away_id)
 
             p_h, p_d, p_a = calculate_probabilities(h_form, a_form)
@@ -200,7 +206,7 @@ def fetch_european_matches():
             )
             league_posts[league_name].append(post)
 
-        time.sleep(2)
+        time.sleep(4)
 
     return league_posts
 
@@ -213,7 +219,7 @@ def fetch_asian_and_iran_matches():
     league_posts = {}
     today_jalali = get_tehran_today_str()
     today_gregorian = datetime.now(pytz.timezone("Asia/Tehran")).strftime("%Y-%m-%d")
-    current_season = "2025"  # فصل جاری مسابقات
+    current_season = "2025"  # فصل جاری
 
     for league_id, league_name in ASIAN_LEAGUES.items():
         url = f"{BASE_URL_AF}/fixtures"
@@ -230,7 +236,8 @@ def fetch_asian_and_iran_matches():
                 print(f"خطا در دریافت {league_name}: استاتوس کد {res.status_code}")
                 continue
 
-            fixtures = res.json().get("response", [])
+            data = res.json()
+            fixtures = data.get("response", [])
             if not fixtures:
                 continue
 
@@ -251,9 +258,11 @@ def fetch_asian_and_iran_matches():
                     f"🆔 {CHANNEL_ID}"
                 )
                 league_posts[league_name].append(post)
+            
+            time.sleep(2)
 
         except Exception as err:
-            print(f"خطا در دریافت اطلاعات {league_name}: {err}")
+            print(f"خطا در ارتباط با {league_name}: {err}")
 
     return league_posts
 
@@ -293,9 +302,9 @@ async def main():
                 except TelegramError as e:
                     print(f"❌ خطا در ارسال پست: {e}")
 
-            await asyncio.sleep(4)
+            await asyncio.sleep(3)
 
-    print("🏁 تمام بازی‌های امروز با موفقیت و به‌صورت تفکیک‌شده ارسال شدند.")
+    print("🏁 تمام بازی‌های امروز با موفقیت ارسال شدند.")
 
 
 if __name__ == "__main__":
