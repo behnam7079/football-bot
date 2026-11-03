@@ -115,7 +115,88 @@ def as_form(form_text):
     return [(symbols[result], 0) for result in results]
 
 
-# ==================== دریافت جدول و رتبه‌ها ====================
+# ==================== دریافت فرم بازی‌های اروپا (Football-Data) ====================
+def match_form_record_fd(match, team_id):
+    if match.get("status") != "FINISHED":
+        return None
+    home = match.get("homeTeam") or {}
+    away = match.get("awayTeam") or {}
+    score = match.get("score") or {}
+    full_time = score.get("fullTime") or {}
+    home_id = home.get("id")
+    away_id = away.get("id")
+    home_goals = full_time.get("home")
+    away_goals = full_time.get("away")
+
+    if team_id not in (home_id, away_id):
+        return None
+
+    winner = {"HOME_TEAM": "home", "AWAY_TEAM": "away", "DRAW": "draw"}.get(score.get("winner"))
+    if winner is None:
+        if not isinstance(home_goals, int) or not isinstance(away_goals, int):
+            return None
+        winner = "home" if home_goals > away_goals else "away" if away_goals > home_goals else "draw"
+
+    symbol = "⚪️" if winner == "draw" else "🟢" if (winner == "home" and team_id == home_id) or (winner == "away" and team_id == away_id) else "🔴"
+    goal_diff = (home_goals - away_goals) if team_id == home_id else (away_goals - home_goals) if isinstance(home_goals, int) and isinstance(away_goals, int) else 0
+    return symbol, goal_diff
+
+
+def get_team_form_fd(team_id, kickoff):
+    if not team_id:
+        return []
+    data = fd_request(
+        f"{BASE_URL_FD}/teams/{team_id}/matches",
+        {"status": "FINISHED", "limit": 10},
+    )
+    if not isinstance(data, dict):
+        return []
+    
+    matches = data.get("matches", [])
+    form = []
+    for match in sorted(matches, key=lambda m: m.get("utcDate", ""), reverse=True):
+        utc_date = match.get("utcDate")
+        if not utc_date:
+            continue
+        try:
+            if parse_datetime(utc_date) >= kickoff:
+                continue
+        except Exception:
+            continue
+        record = match_form_record_fd(match, team_id)
+        if record is not None:
+            form.append(record)
+        if len(form) == 5:
+            break
+    return form
+
+
+# ==================== دریافت فرم آسیا و ایران (API-Sports) ====================
+def get_team_form_as(team_id):
+    if not team_id:
+        return []
+    items = as_detail("fixtures", {"team": team_id, "last": 5, "status": "FT"})
+    if not items:
+        return []
+    form = []
+    for match in items:
+        teams = match.get("teams") or {}
+        home = teams.get("home") or {}
+        away = teams.get("away") or {}
+        home_id = home.get("id")
+        away_id = away.get("id")
+
+        if home.get("winner") is True:
+            symbol = "🟢" if team_id == home_id else "🔴"
+        elif away.get("winner") is True:
+            symbol = "🟢" if team_id == away_id else "🔴"
+        else:
+            symbol = "⚪️"
+        form.append((symbol, 0))
+    return form
+
+
+# ==================== جدول رده‌بندی ====================
 def get_fd_standings(competition_code, cache):
     if competition_code in cache:
         return cache[competition_code]
@@ -126,13 +207,10 @@ def get_fd_standings(competition_code, cache):
             if st.get("type") == "TOTAL":
                 for row in st.get("table", []):
                     team_id = (row.get("team") or {}).get("id")
-                    form_str = row.get("form") or ""
-                    form_list = as_form(form_str)
                     standings_info[team_id] = {
                         "rank": row.get("position"),
                         "points": row.get("points"),
                         "played": row.get("playedGames"),
-                        "form": form_list
                     }
     cache[competition_code] = standings_info
     return standings_info
@@ -149,12 +227,11 @@ def get_as_standings(league_id, season, cache):
         for group in groups:
             for row in group:
                 team_id = (row.get("team") or {}).get("id")
-                form_str = row.get("form") or ""
                 standings_info[team_id] = {
                     "rank": row.get("rank"),
                     "points": row.get("points"),
                     "played": (row.get("all") or {}).get("played"),
-                    "form": as_form(form_str)
+                    "form_str": row.get("form") or ""
                 }
     cache[key] = standings_info
     return standings_info
@@ -163,15 +240,10 @@ def get_as_standings(league_id, season, cache):
 def format_form(form):
     if not form:
         return NO_FORM
-    symbols = " ".join(result for result, _ in form)
-    if len(form) < 5:
-        return f"{symbols} (تعداد: {len(form)})"
-    return symbols
+    return " ".join(result for result, _ in form)
 
 
-# ==================== فرمول پیش‌بینی شانس ====================
 def calculate_probabilities(home_rank_data, away_rank_data, home_form, away_form):
-    # قدرت پایه بر اساس امتیاز در هر بازی (PPG) یا رتبه
     def calc_score(data, form):
         score = 2.0
         if data and data.get("played") and data.get("points") is not None:
@@ -180,29 +252,24 @@ def calculate_probabilities(home_rank_data, away_rank_data, home_form, away_form
         elif data and data.get("rank"):
             score += max(0.5, 4.0 - (data["rank"] * 0.15))
         
-        # تاثیر ۵ بازی اخیر
         if form:
             form_points = sum(3 if r == "🟢" else 1 if r == "⚪️" else 0 for r, _ in form)
             score += (form_points / max(1, len(form))) * 0.8
         return max(0.5, score)
 
-    home_score = calc_score(home_rank_data, home_form) + 0.5  # مزیت میزبانی
+    home_score = calc_score(home_rank_data, home_form) + 0.4
     away_score = calc_score(away_rank_data, away_form)
 
-    # شانس مساوی بر اساس نزدیکی قدرت دو تیم
     diff = abs(home_score - away_score)
-    draw_score = max(1.2, 2.5 - (diff * 0.35))
+    draw_score = max(1.2, 2.4 - (diff * 0.35))
 
     total = home_score + draw_score + away_score
     home_pct = round((home_score / total) * 100)
     draw_pct = round((draw_score / total) * 100)
     away_pct = 100 - home_pct - draw_pct
-
-    # تنظیم مرزها
     return max(5, home_pct), max(5, draw_pct), max(5, away_pct)
 
 
-# ==================== تولید پیام پست ====================
 def build_post(
     competition_name,
     home_name,
@@ -217,10 +284,9 @@ def build_post(
     h = escape(home_name)
     a = escape(away_name)
 
-    # قالب نمایش رتبه
     def rank_label(data):
         if not data or not data.get("rank"):
-            return "رتبه ثبت نشده"
+            return "نامشخص / حذفی"
         pts = f" ({data['points']} امتیاز)" if data.get("points") is not None else ""
         return f"رتبه {data['rank']}{pts}"
 
@@ -250,7 +316,7 @@ def build_post(
     )
 
 
-# ==================== دریافت لیگ‌های اروپا ====================
+# ==================== دریافت مسابقات اروپا ====================
 def fetch_european_matches():
     posts_by_league = {}
     today = tehran_today()
@@ -272,19 +338,20 @@ def fetch_european_matches():
             if match.get("status") not in ("SCHEDULED", "TIMED"):
                 continue
             try:
+                kickoff = parse_datetime(match["utcDate"])
                 match_date, match_time = convert_to_tehran(match["utcDate"])
             except Exception:
                 continue
 
             if match_date == today_jalali:
-                selected.append((match_time, match, match_date))
+                selected.append((match_time, match, match_date, kickoff))
 
         if not selected:
             continue
 
         standings = get_fd_standings(code, standings_cache)
         posts = []
-        for match_time, match, match_date in selected:
+        for match_time, match, match_date, kickoff in selected:
             home = match.get("homeTeam") or {}
             away = match.get("awayTeam") or {}
             home_id = home.get("id")
@@ -292,8 +359,11 @@ def fetch_european_matches():
 
             home_rank = standings.get(home_id, {})
             away_rank = standings.get(away_id, {})
-            home_form = home_rank.get("form", [])
-            away_form = away_rank.get("form", [])
+
+            home_form = get_team_form_fd(home_id, kickoff)
+            time.sleep(1)
+            away_form = get_team_form_fd(away_id, kickoff)
+            time.sleep(1)
 
             posts.append(
                 build_post(
@@ -354,8 +424,14 @@ def fetch_api_sports_matches():
         home_rank = standings.get(home_id, {})
         away_rank = standings.get(away_id, {})
 
-        home_form = home_rank.get("form", [])
-        away_form = away_rank.get("form", [])
+        # گرفتن فرم ابتدا از رشته فرم جدول و در صورت نبودن، از ۵ مسابقه اخیر
+        home_form = as_form(home_rank.get("form_str"))
+        if not home_form:
+            home_form = get_team_form_as(home_id)
+
+        away_form = as_form(away_rank.get("form_str"))
+        if not away_form:
+            away_form = get_team_form_as(away_id)
 
         competition_name = API_SPORTS_COMPETITIONS[league_id]
         post = build_post(
@@ -388,7 +464,7 @@ async def safe_send_message(bot, chat_id, text, parse_mode="HTML"):
 
 
 async def main():
-    print("🔄 در حال دریافت بازی‌ها، جدول رده‌بندی و محاسبه احتمالات...")
+    print("🔄 در حال دریافت بازی‌ها، رتبه‌ها و فرم ۵ بازی اخیر...")
 
     posts_by_league = fetch_european_matches()
     posts_by_league.update(fetch_api_sports_matches())
@@ -412,7 +488,7 @@ async def main():
                 await asyncio.sleep(2.5)
                 await safe_send_message(bot, CHANNEL_ID, post)
 
-    print("🏁 تمام پست‌ها با موفقیت در کانال منتشر شدند.")
+    print("🏁 تمام پست‌ها ارسال شدند.")
 
 
 if __name__ == "__main__":
