@@ -80,7 +80,6 @@ def fd_request(url, params):
             )
 
             if response.status_code == 429 and attempt == 0:
-                print("⚠️ محدودیت درخواست football-data؛ یک دقیقه مکث...")
                 time.sleep(65)
                 continue
 
@@ -144,15 +143,20 @@ def get_team_form_as(team_id):
             return "اطلاعاتی ثبت نشده"
 
         data = response.json().get("response", [])
-        form = []
+        if not data:
+            return "اطلاعاتی ثبت نشده"
 
+        form = []
         for match in data:
             teams = match.get("teams", {})
             goals = match.get("goals", {})
             home_id = teams.get("home", {}).get("id")
 
-            home_goals = goals.get("home", 0) or 0
-            away_goals = goals.get("away", 0) or 0
+            home_goals = goals.get("home")
+            away_goals = goals.get("away")
+
+            if home_goals is None or away_goals is None:
+                continue
 
             if home_goals == away_goals:
                 form.append("⚪️")
@@ -173,13 +177,21 @@ def get_team_form_as(team_id):
 
 
 def calculate_probabilities(home_form, away_form):
+    if (
+        home_form == "اطلاعاتی ثبت نشده"
+        or away_form == "اطلاعاتی ثبت نشده"
+        or not home_form.strip()
+        or not away_form.strip()
+    ):
+        return 45, 25, 30
+
     home_score = home_form.count("🟢") * 3 + home_form.count("⚪️") + 2
     away_score = away_form.count("🟢") * 3 + away_form.count("⚪️")
     draw_score = 3
 
     total = home_score + away_score + draw_score
     if total <= 0:
-        return 34, 33, 33
+        return 45, 25, 30
 
     home = round(home_score / total * 100)
     draw = round(draw_score / total * 100)
@@ -365,9 +377,6 @@ async def safe_send_message(bot, chat_id, text, parse_mode="HTML"):
             break
         except RetryAfter as e:
             wait_time = e.retry_after + 2
-            print(
-                f"⚠️ محدودیت ارسال تلگرام (Flood Control). در حال مکث برای {wait_time} ثانیه..."
-            )
             await asyncio.sleep(wait_time)
         except TelegramError as e:
             print(f"❌ خطا در ارسال پیام: {e}")
