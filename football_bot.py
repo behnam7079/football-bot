@@ -21,8 +21,6 @@ TEHRAN = pytz.timezone("Asia/Tehran")
 BASE_URL_FD = "https://api.football-data.org/v4"
 BASE_URL_AF = "https://v3.football.api-sports.io"
 
-NO_FORM = "اطلاعاتی ثبت نشده"
-
 EUROPE_LEAGUES = {
     "PL": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 لیگ برتر انگلیس",
     "SA": "🇮🇹 سری آ ایتالیا",
@@ -50,6 +48,17 @@ DOMESTIC_CUPS = {
 API_SPORTS_COMPETITIONS = {
     **ASIAN_AND_IRAN_LEAGUES,
     **DOMESTIC_CUPS,
+}
+
+# ضرایب تیم‌های شاخص برای بازی‌های حذفی یا مواقع نبود جدول
+ELITE_TEAMS = {
+    "real madrid": 9.5, "barcelona": 9.2, "atletico madrid": 8.5,
+    "manchester city": 9.6, "liverpool": 9.3, "arsenal": 9.1, "chelsea": 8.2, "manchester united": 8.0, "tottenham": 8.0,
+    "bayern munich": 9.4, "borussia dortmund": 8.3, "bayer leverkusen": 8.8,
+    "inter": 8.9, "juventus": 8.4, "ac milan": 8.3, "napoli": 8.2,
+    "paris saint germain": 9.0,
+    "persepolis": 8.0, "esteghlal": 7.9, "sepahan": 7.8, "tractor": 7.7,
+    "al hilal": 8.8, "al nassr": 8.6, "al ahli": 8.1, "al ittihad": 8.2
 }
 
 
@@ -99,7 +108,7 @@ def as_detail(endpoint, params):
             f"{BASE_URL_AF}/{endpoint}",
             headers={"x-apisports-key": API_FOOTBALL_KEY},
             params=params,
-            timeout=30,
+            timeout=25,
         )
         data = response.json()
         if response.status_code != 200 or data.get("errors"):
@@ -110,7 +119,9 @@ def as_detail(endpoint, params):
 
 
 def as_form(form_text):
-    results = [c for c in str(form_text or "").upper() if c in "WDL"][-5:]
+    if not form_text:
+        return []
+    results = [c for c in str(form_text).upper() if c in "WDL"][-5:]
     symbols = {"W": "🟢", "D": "⚪️", "L": "🔴"}
     return [(symbols[result], 0) for result in results]
 
@@ -151,7 +162,7 @@ def get_team_form_fd(team_id, kickoff):
     )
     if not isinstance(data, dict):
         return []
-    
+
     matches = data.get("matches", [])
     form = []
     for match in sorted(matches, key=lambda m: m.get("utcDate", ""), reverse=True):
@@ -175,11 +186,14 @@ def get_team_form_fd(team_id, kickoff):
 def get_team_form_as(team_id):
     if not team_id:
         return []
-    items = as_detail("fixtures", {"team": team_id, "last": 5, "status": "FT"})
+    items = as_detail("fixtures", {"team": team_id, "last": 5})
     if not items:
         return []
     form = []
     for match in items:
+        fixture = match.get("fixture") or {}
+        if (fixture.get("status") or {}).get("short") not in ("FT", "AET", "PEN"):
+            continue
         teams = match.get("teams") or {}
         home = teams.get("home") or {}
         away = teams.get("away") or {}
@@ -231,43 +245,60 @@ def get_as_standings(league_id, season, cache):
                     "rank": row.get("rank"),
                     "points": row.get("points"),
                     "played": (row.get("all") or {}).get("played"),
-                    "form_str": row.get("form") or ""
+                    "form_str": row.get("form") or "",
                 }
     cache[key] = standings_info
     return standings_info
 
 
-def format_form(form):
-    if not form:
-        return NO_FORM
-    return " ".join(result for result, _ in form)
+def format_form(form, is_cup=False):
+    if form and len(form) > 0:
+        return " ".join(result for result, _ in form)
+    if is_cup:
+        return "⚡️ صعود به این مرحله"
+    return "در دسترس نیست"
 
 
-def calculate_probabilities(home_rank_data, away_rank_data, home_form, away_form):
-    def calc_score(data, form):
-        score = 2.0
+# ==================== محاسبه درصدهای شانس هوشمند ====================
+def get_base_strength(team_name):
+    t_lower = team_name.lower()
+    for name, rating in ELITE_TEAMS.items():
+        if name in t_lower:
+            return rating
+    return 5.0  # قدرت پیش‌فرض تیم‌های معمولی
+
+
+def calculate_probabilities(home_name, away_name, home_rank_data, away_rank_data, home_form, away_form, is_cup=False):
+    home_base = get_base_strength(home_name)
+    away_base = get_base_strength(away_name)
+
+    def calc_score(data, form, base_power):
+        score = base_power
         if data and data.get("played") and data.get("points") is not None:
             ppg = data["points"] / max(1, data["played"])
-            score += ppg * 1.5
+            score += ppg * 1.6
         elif data and data.get("rank"):
             score += max(0.5, 4.0 - (data["rank"] * 0.15))
-        
+
         if form:
             form_points = sum(3 if r == "🟢" else 1 if r == "⚪️" else 0 for r, _ in form)
-            score += (form_points / max(1, len(form))) * 0.8
-        return max(0.5, score)
+            score += (form_points / max(1, len(form))) * 0.7
+        return max(1.0, score)
 
-    home_score = calc_score(home_rank_data, home_form) + 0.4
-    away_score = calc_score(away_rank_data, away_form)
+    home_score = calc_score(home_rank_data, home_form, home_base) + 0.35  # مزیت جزئی میزبانی
+    away_score = calc_score(away_rank_data, away_form, away_base)
 
     diff = abs(home_score - away_score)
-    draw_score = max(1.2, 2.4 - (diff * 0.35))
+    base_draw = 1.6 if is_cup else 2.3
+    draw_score = max(0.8, base_draw - (diff * 0.25))
 
     total = home_score + draw_score + away_score
     home_pct = round((home_score / total) * 100)
     draw_pct = round((draw_score / total) * 100)
     away_pct = 100 - home_pct - draw_pct
-    return max(5, home_pct), max(5, draw_pct), max(5, away_pct)
+
+    # در صورت تفاوت فاحش (مثلا رئال میهمان مقابل تیم ضعیف)، شانس رئال حفظ می‌شود
+    return max(5, home_pct), max(8, draw_pct), max(5, away_pct)
 
 
 def build_post(
@@ -280,17 +311,26 @@ def build_post(
     away_rank_data,
     home_form,
     away_form,
+    is_cup=False,
 ):
     h = escape(home_name)
     a = escape(away_name)
 
     def rank_label(data):
+        if is_cup:
+            return "مرحله حذفی"
         if not data or not data.get("rank"):
-            return "نامشخص / حذفی"
+            return "مشخص‌نشده"
         pts = f" ({data['points']} امتیاز)" if data.get("points") is not None else ""
         return f"رتبه {data['rank']}{pts}"
 
-    p_home, p_draw, p_away = calculate_probabilities(home_rank_data, away_rank_data, home_form, away_form)
+    p_home, p_draw, p_away = calculate_probabilities(
+        home_name, away_name, home_rank_data, away_rank_data, home_form, away_form, is_cup=is_cup
+    )
+
+    form_h_text = format_form(home_form, is_cup)
+    form_a_text = format_form(away_form, is_cup)
+    legend_line = "(🟢 برد | ⚪️ مساوی | 🔴 باخت)\n\n" if (home_form or away_form) else "\n"
 
     return (
         f"🏆 <b>{escape(competition_name)}</b>\n"
@@ -298,16 +338,16 @@ def build_post(
         f"🏟 <b>{h}</b> 🆚 <b>{a}</b>\n"
         f"📅 تاریخ: {match_date} | ⏰ ساعت: {match_time}\n\n"
         "━━━━━━━━━━━━━━\n"
-        "📊 <b>جایگاه در جدول:</b>\n"
+        "📊 <b>وضعیت جدول / مرحله:</b>\n"
         f"▫️ {h}: <b>{rank_label(home_rank_data)}</b>\n"
         f"▫️ {a}: <b>{rank_label(away_rank_data)}</b>\n\n"
         "━━━━━━━━━━━━━━\n"
-        "📈 <b>فرم ۵ بازی اخیر:</b>\n"
-        f"▫️ {h}: {format_form(home_form)}\n"
-        f"▫️ {a}: {format_form(away_form)}\n"
-        "(🟢 برد | ⚪️ مساوی | 🔴 باخت)\n\n"
+        "📈 <b>فرم بازی‌های اخیر:</b>\n"
+        f"▫️ {h}: {form_h_text}\n"
+        f"▫️ {a}: {form_a_text}\n"
+        f"{legend_line}"
         "━━━━━━━━━━━━━━\n"
-        "🎲 <b>پیش‌بینی شانس نتیجه:</b>\n"
+        "🎲 <b>پیش‌بینی شانس برد:</b>\n"
         f"🟢 برد {h}: <b>{p_home}%</b>\n"
         f"⚪️ مساوی: <b>{p_draw}%</b>\n"
         f"🔴 برد {a}: <b>{p_away}%</b>\n\n"
@@ -376,6 +416,7 @@ def fetch_european_matches():
                     away_rank,
                     home_form,
                     away_form,
+                    is_cup=False,
                 )
             )
         posts_by_league[league_name] = posts
@@ -419,19 +460,27 @@ def fetch_api_sports_matches():
         home_id = home_team.get("id")
         away_id = away_team.get("id")
         season = league.get("season")
+        is_cup = league_id in DOMESTIC_CUPS
 
-        standings = get_as_standings(league_id, season, standings_cache)
-        home_rank = standings.get(home_id, {})
-        away_rank = standings.get(away_id, {})
+        home_rank = {}
+        away_rank = {}
+        home_form = []
+        away_form = []
 
-        # گرفتن فرم ابتدا از رشته فرم جدول و در صورت نبودن، از ۵ مسابقه اخیر
-        home_form = as_form(home_rank.get("form_str"))
+        if not is_cup:
+            standings = get_as_standings(league_id, season, standings_cache)
+            home_rank = standings.get(home_id, {})
+            away_rank = standings.get(away_id, {})
+            home_form = as_form(home_rank.get("form_str"))
+            away_form = as_form(away_rank.get("form_str"))
+
         if not home_form:
             home_form = get_team_form_as(home_id)
+            time.sleep(0.5)
 
-        away_form = as_form(away_rank.get("form_str"))
         if not away_form:
             away_form = get_team_form_as(away_id)
+            time.sleep(0.5)
 
         competition_name = API_SPORTS_COMPETITIONS[league_id]
         post = build_post(
@@ -444,6 +493,7 @@ def fetch_api_sports_matches():
             away_rank,
             home_form,
             away_form,
+            is_cup=is_cup,
         )
         posts_by_competition.setdefault(competition_name, []).append(post)
 
