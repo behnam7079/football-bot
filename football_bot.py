@@ -10,11 +10,9 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 # ==================== کلیدها و تنظیمات ====================
-TELEGRAM_BOT_TOKEN = "9214310265:AAENQk-mVivaBSsS0TfWeDk3XJ1FGc37-Gg".strip()
-FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71".strip()
-
-# در صورت ثبت‌نام در api-football.com کلید آن را اینجا یا در Secrets گیت‌هاب بگذارید (اختیاری)
-API_FOOTBALL_KEY = "35e40e3c03a67c55038905a33c06c74b".strip()
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "9214310265:AAENQk-mVivaBSsS0TfWeDk3XJ1FGc37-Gg").strip()
+FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY", "2e7733d64c92451b871ddf1dfba3ff71").strip()
+API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "35e40e3c03a67c55038905a33c06c74b").strip()
 
 CHANNEL_ID = "@footbal7079"
 
@@ -29,10 +27,16 @@ EUROPE_LEAGUES = {
     "EL": "🇪🇺 لیگ اروپا"
 }
 
-# لیگ‌های ایران و آسیا (api-football.com)
+# لیگ‌های ایران، آسیا و جام‌های حذفی (api-football.com)
+# شناسه ۶۶: جام حذفی فرانسه (Coupe de France)
+# شناسه ۴۹۵: جام حذفی ایران (Hazfi Cup)
+# شناسه ۲۹۰: لیگ برتر ایران
+# شناسه ۱۷: لیگ نخبگان آسیا
 ASIAN_LEAGUES = {
     290: "🇮🇷 لیگ برتر ایران",
-    17: "🌏 لیگ نخبگان آسیا"
+    495: "🇮🇷 جام حذفی ایران",
+    17: "🌏 لیگ نخبگان آسیا",
+    66: "🇫🇷 جام حذفی فرانسه"
 }
 
 HEADERS_FD = {"X-Auth-Token": FOOTBALL_API_KEY}
@@ -128,7 +132,6 @@ def fetch_european_matches():
     league_posts = {}
     today_jalali = get_tehran_today_str()
     
-    # برای جلوگیری از جا ماندن بازی‌ها به دلیل اختلاف ساعت UTC
     today_utc = datetime.utcnow()
     date_from = today_utc.strftime("%Y-%m-%d")
     date_to = (today_utc + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -155,14 +158,12 @@ def fetch_european_matches():
                 continue
 
             jalali_date, match_time = convert_utc_to_tehran(match.get("utcDate", ""))
-            # فقط مسابقاتی که تاریخ تهران آن‌ها دقیقا امروز است
             if jalali_date == today_jalali:
                 valid_matches.append((match, jalali_date, match_time))
 
         if not valid_matches:
             continue
 
-        # مرتب‌سازی بازی‌های این لیگ بر اساس ساعت برگزاری
         valid_matches.sort(key=lambda item: item[2])
         league_posts[league_name] = []
 
@@ -205,21 +206,28 @@ def fetch_european_matches():
 
 
 def fetch_asian_and_iran_matches():
-    """دریافت بازی‌های لیگ ایران و آسیا از api-football در صورت تعریف کلید"""
+    """دریافت بازی‌های لیگ ایران، آسیا و جام‌های حذفی از api-football"""
     if not API_FOOTBALL_KEY:
         return {}
 
     league_posts = {}
     today_jalali = get_tehran_today_str()
     today_gregorian = datetime.now(pytz.timezone("Asia/Tehran")).strftime("%Y-%m-%d")
+    current_season = "2025"  # فصل جاری مسابقات
 
     for league_id, league_name in ASIAN_LEAGUES.items():
         url = f"{BASE_URL_AF}/fixtures"
-        params = {"league": league_id, "date": today_gregorian}
+        params = {
+            "league": league_id,
+            "season": current_season,
+            "date": today_gregorian,
+            "timezone": "Asia/Tehran"
+        }
 
         try:
             res = requests.get(url, headers=HEADERS_AF, params=params, timeout=20)
             if res.status_code != 200:
+                print(f"خطا در دریافت {league_name}: استاتوس کد {res.status_code}")
                 continue
 
             fixtures = res.json().get("response", [])
@@ -256,7 +264,7 @@ async def main():
     # جمع‌آوری مسابقات اروپایی
     all_grouped_posts = fetch_european_matches()
 
-    # جمع‌آوری مسابقات ایران و آسیا (در صورت تنظیم بودن API)
+    # جمع‌آوری مسابقات ایران، آسیا و جام‌های حذفی
     asian_posts = fetch_asian_and_iran_matches()
     for league, posts in asian_posts.items():
         all_grouped_posts[league] = posts
@@ -270,7 +278,6 @@ async def main():
         for league_name, posts in all_grouped_posts.items():
             print(f"📌 در حال ارسال بازی‌های {league_name} ({len(posts)} مسابقه)...")
             
-            # تیتر تفکیک‌کننده برای هر لیگ
             header_text = f"📢 *بازی‌های امروز در {league_name}*"
             try:
                 await bot.send_message(chat_id=CHANNEL_ID, text=header_text, parse_mode="Markdown")
@@ -278,7 +285,6 @@ async def main():
             except TelegramError as e:
                 print(f"خطا در ارسال تیتر لیگ: {e}")
 
-            # ارسال بازی‌های همان لیگ
             for post in posts:
                 try:
                     await bot.send_message(chat_id=CHANNEL_ID, text=post, parse_mode="Markdown")
@@ -287,7 +293,6 @@ async def main():
                 except TelegramError as e:
                     print(f"❌ خطا در ارسال پست: {e}")
 
-            # مکث کوتاه بین لیگ‌های مختلف برای نظم و زیبایی کانال
             await asyncio.sleep(4)
 
     print("🏁 تمام بازی‌های امروز با موفقیت و به‌صورت تفکیک‌شده ارسال شدند.")
