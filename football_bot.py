@@ -9,7 +9,7 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 # ==================== کلیدها و تنظیمات ====================
-TELEGRAM_BOT_TOKEN = "7547141381:AAF67Tq648iH8K_G9U8sF8_u6x5c8e2r8wY".strip()
+TELEGRAM_BOT_TOKEN = "9214310265:AAGUv7yYcmWWare4eTql2dzYOuLFT89h3l0".strip()
 FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71".strip()
 API_FOOTBALL_KEY = "35e40e3c03a67c55038905a33c06c74b".strip()
 
@@ -84,7 +84,7 @@ def get_team_form_fd(team_id):
     try:
         response = requests.get(url, headers=HEADERS_FD, params=params, timeout=15)
         if response.status_code == 429:
-            time.sleep(10)
+            time.sleep(15)
             response = requests.get(url, headers=HEADERS_FD, params=params, timeout=15)
         
         if response.status_code != 200:
@@ -143,11 +143,13 @@ def fetch_european_matches():
         try:
             res = requests.get(url, headers=HEADERS_FD, params=params, timeout=20)
             if res.status_code == 429:
-                time.sleep(12)
+                print(f"⚠️ محدودیت نرخ (429) برای {league_name}، مکث طولانی...")
+                time.sleep(20)
                 res = requests.get(url, headers=HEADERS_FD, params=params, timeout=20)
             
             if res.status_code != 200:
                 print(f"خطا در دریافت لیگ {league_name}: استاتوس کد {res.status_code}")
+                time.sleep(5)
                 continue
 
             matches = res.json().get("matches", [])
@@ -165,7 +167,7 @@ def fetch_european_matches():
                 valid_matches.append((match, jalali_date, match_time))
 
         if not valid_matches:
-            time.sleep(2)
+            time.sleep(3)
             continue
 
         valid_matches.sort(key=lambda item: item[2])
@@ -177,9 +179,9 @@ def fetch_european_matches():
             home_id = match["homeTeam"]["id"]
             away_id = match["awayTeam"]["id"]
 
-            time.sleep(1.5)
+            time.sleep(2)
             h_form = get_team_form_fd(home_id)
-            time.sleep(1.5)
+            time.sleep(2)
             a_form = get_team_form_fd(away_id)
 
             p_h, p_d, p_a = calculate_probabilities(h_form, a_form)
@@ -204,7 +206,7 @@ def fetch_european_matches():
             )
             league_posts[league_name].append(post)
 
-        time.sleep(3)
+        time.sleep(5)
 
     return league_posts
 
@@ -256,7 +258,7 @@ def fetch_asian_and_iran_matches():
                 )
                 league_posts[league_name].append(post)
             
-            time.sleep(2)
+            time.sleep(3)
 
         except Exception as err:
             print(f"خطا در ارتباط با {league_name}: {err}")
