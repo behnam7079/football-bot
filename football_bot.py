@@ -8,7 +8,7 @@ import jdatetime
 import pytz
 import requests
 from telegram import Bot
-from telegram.error import TelegramError
+from telegram.error import RetryAfter, TelegramError
 
 # ==================== کلیدها و تنظیمات ====================
 TELEGRAM_BOT_TOKEN = "9214310265:AAFNu67-vsLbBksZq4uMP0-1QPCwZZRXTuA"
@@ -45,7 +45,6 @@ DOMESTIC_CUPS = {
     66: "🇫🇷 جام حذفی فرانسه",
 }
 
-# ترکیب تمام رقابت‌هایی که از API-Sports دریافت می‌شوند
 API_SPORTS_COMPETITIONS = {**ASIAN_AND_IRAN_LEAGUES, **DOMESTIC_CUPS}
 
 BASE_URL_FD = "https://api.football-data.org/v4"
@@ -86,15 +85,11 @@ def fd_request(url, params):
                 continue
 
             if response.status_code != 200:
-                print(f"❌ football-data: کد HTTP {response.status_code}")
                 return None
 
             return response.json()
-
-        except (requests.RequestException, ValueError) as error:
-            print(f"❌ خطا در درخواست football-data: {error}")
+        except Exception:
             return None
-
     return None
 
 
@@ -117,7 +112,6 @@ def get_team_form_fd(team_id):
     )
 
     form = []
-
     for match in matches[:5]:
         winner = (match.get("score") or {}).get("winner")
         home_id = (match.get("homeTeam") or {}).get("id")
@@ -135,12 +129,58 @@ def get_team_form_fd(team_id):
     return " ".join(form) if form else "اطلاعاتی ثبت نشده"
 
 
+def get_team_form_as(team_id):
+    if not team_id:
+        return "اطلاعاتی ثبت نشده"
+
+    try:
+        response = requests.get(
+            f"{BASE_URL_AF}/fixtures",
+            headers={"x-apisports-key": API_FOOTBALL_KEY},
+            params={"team": team_id, "last": 5, "status": "FT"},
+            timeout=20,
+        )
+        if response.status_code != 200:
+            return "اطلاعاتی ثبت نشده"
+
+        data = response.json().get("response", [])
+        form = []
+
+        for match in data:
+            teams = match.get("teams", {})
+            goals = match.get("goals", {})
+            home_id = teams.get("home", {}).get("id")
+
+            home_goals = goals.get("home", 0) or 0
+            away_goals = goals.get("away", 0) or 0
+
+            if home_goals == away_goals:
+                form.append("⚪️")
+            elif home_id == team_id:
+                if home_goals > away_goals:
+                    form.append("🟢")
+                else:
+                    form.append("🔴")
+            else:
+                if away_goals > home_goals:
+                    form.append("🟢")
+                else:
+                    form.append("🔴")
+
+        return " ".join(form) if form else "اطلاعاتی ثبت نشده"
+    except Exception:
+        return "اطلاعاتی ثبت نشده"
+
+
 def calculate_probabilities(home_form, away_form):
     home_score = home_form.count("🟢") * 3 + home_form.count("⚪️") + 2
     away_score = away_form.count("🟢") * 3 + away_form.count("⚪️")
     draw_score = 3
 
     total = home_score + away_score + draw_score
+    if total <= 0:
+        return 34, 33, 33
+
     home = round(home_score / total * 100)
     draw = round(draw_score / total * 100)
     away = 100 - home - draw
@@ -163,32 +203,26 @@ def fetch_european_matches():
         )
 
         if data is None:
-            print(f"⚠️ دریافت {league_name} ناموفق بود.")
             continue
 
         selected = []
-
         for match in data.get("matches", []):
             if match.get("status") not in ("SCHEDULED", "TIMED"):
                 continue
 
             try:
                 match_date, match_time = convert_to_tehran(match["utcDate"])
-            except (KeyError, ValueError, AttributeError) as error:
-                print(f"⚠️ تاریخ نامعتبر در {league_name}: {error}")
+            except Exception:
                 continue
 
             if match_date == today_jalali:
                 selected.append((match_time, match, match_date))
 
         selected.sort(key=lambda entry: entry[0])
-        print(f"🔎 {league_name}: {len(selected)} بازی امروز")
-
         if not selected:
             continue
 
         league_posts = []
-
         for match_time, match, match_date in selected:
             home = match.get("homeTeam") or {}
             away = match.get("awayTeam") or {}
@@ -201,7 +235,9 @@ def fetch_european_matches():
             away_form = get_team_form_fd(away.get("id"))
             time.sleep(2)
 
-            p_home, p_draw, p_away = calculate_probabilities(home_form, away_form)
+            p_home, p_draw, p_away = calculate_probabilities(
+                home_form, away_form
+            )
 
             h = escape(home_name)
             a = escape(away_name)
@@ -238,30 +274,21 @@ def fetch_api_sports_matches():
     response = requests.get(
         f"{BASE_URL_AF}/fixtures",
         headers={"x-apisports-key": API_FOOTBALL_KEY},
-        params={
-            "date": today.isoformat(),
-            "timezone": "Asia/Tehran",
-        },
+        params={"date": today.isoformat(), "timezone": "Asia/Tehran"},
         timeout=30,
     )
 
     if response.status_code != 200:
-        raise RuntimeError(
-            f"دریافت بازی‌ها از API-Sports ناموفق بود؛ HTTP {response.status_code}"
-        )
+        return {}
 
     data = response.json()
-
-    if data.get("errors"):
-        raise RuntimeError(f"API-Sports خطا برگرداند: {data['errors']}")
-
-    fixtures = data.get("response")
+    fixtures = data.get("response", [])
     if not isinstance(fixtures, list):
-        raise RuntimeError("پاسخ API-Sports فهرست مسابقات ندارد.")
+        return {}
 
-    print(f"🔎 API-Sports: {len(fixtures)} مسابقه در کل مسابقات امروز جهان")
-
-    posts_by_competition = {name: [] for name in API_SPORTS_COMPETITIONS.values()}
+    posts_by_competition = {
+        name: [] for name in API_SPORTS_COMPETITIONS.values()
+    }
 
     for item in fixtures:
         league_id = (item.get("league") or {}).get("id")
@@ -277,23 +304,45 @@ def fetch_api_sports_matches():
 
         try:
             match_date, match_time = convert_to_tehran(fixture["date"])
-        except (KeyError, ValueError, AttributeError) as error:
-            print(f"⚠️ تاریخ نامعتبر برای رقابت {league_id}: {error}")
+        except Exception:
             continue
 
         if match_date != today_jalali:
             continue
 
         teams = item.get("teams") or {}
-        home = (teams.get("home") or {}).get("name") or "نامشخص"
-        away = (teams.get("away") or {}).get("name") or "نامشخص"
+        home_team = teams.get("home") or {}
+        away_team = teams.get("away") or {}
+
+        home = home_team.get("name") or "نامشخص"
+        away = away_team.get("name") or "نامشخص"
+
+        home_form = get_team_form_as(home_team.get("id"))
+        time.sleep(2)
+        away_form = get_team_form_as(away_team.get("id"))
+        time.sleep(2)
+
+        p_home, p_draw, p_away = calculate_probabilities(home_form, away_form)
         competition_name = API_SPORTS_COMPETITIONS[league_id]
+
+        h = escape(home)
+        a = escape(away)
 
         post = (
             f"🏆 <b>{escape(competition_name)}</b>\n"
-            "⚽️ <b>برنامهٔ مسابقه امروز</b>\n\n"
-            f"🏟 <b>{escape(home)}</b> 🆚 <b>{escape(away)}</b>\n"
+            "⚽️ <b>تحلیل و پیش‌بینی مسابقهٔ امروز</b>\n\n"
+            f"🏟 <b>{h}</b> 🆚 <b>{a}</b>\n"
             f"📅 تاریخ: {match_date} | ⏰ ساعت: {match_time}\n\n"
+            "━━━━━━━━━━━━━━\n"
+            "📊 <b>برآورد تقریبی نتیجه:</b>\n"
+            f"🟢 برد {h}: {p_home}%\n"
+            f"⚪️ مساوی: {p_draw}%\n"
+            f"🔴 برد {a}: {p_away}%\n\n"
+            "━━━━━━━━━━━━━━\n"
+            "📈 <b>فرم پنج بازی گذشته:</b>\n"
+            f"▫️ {h}: {home_form}\n"
+            f"▫️ {a}: {away_form}\n"
+            "(🟢 برد | ⚪️ مساوی | 🔴 باخت)\n\n"
             "━━━━━━━━━━━━━━\n"
             f"🆔 {CHANNEL_ID}"
         )
@@ -305,6 +354,24 @@ def fetch_api_sports_matches():
         for comp_name, posts in posts_by_competition.items()
         if posts
     }
+
+
+async def safe_send_message(bot, chat_id, text, parse_mode="HTML"):
+    while True:
+        try:
+            await bot.send_message(
+                chat_id=chat_id, text=text, parse_mode=parse_mode
+            )
+            break
+        except RetryAfter as e:
+            wait_time = e.retry_after + 2
+            print(
+                f"⚠️ محدودیت ارسال تلگرام (Flood Control). در حال مکث برای {wait_time} ثانیه..."
+            )
+            await asyncio.sleep(wait_time)
+        except TelegramError as e:
+            print(f"❌ خطا در ارسال پیام: {e}")
+            break
 
 
 async def main():
@@ -321,25 +388,15 @@ async def main():
         for comp_name, posts in posts_by_league.items():
             print(f"📌 ارسال {comp_name}: {len(posts)} بازی")
 
-            try:
-                await bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=f"📢 <b>بازی‌های امروز در {escape(comp_name)}</b>",
-                    parse_mode="HTML",
-                )
+            await safe_send_message(
+                bot,
+                CHANNEL_ID,
+                f"📢 <b>بازی‌های امروز در {escape(comp_name)}</b>",
+            )
 
-                for post in posts:
-                    await asyncio.sleep(2)
-                    await bot.send_message(
-                        chat_id=CHANNEL_ID,
-                        text=post,
-                        parse_mode="HTML",
-                    )
-
-            except TelegramError as error:
-                raise RuntimeError(
-                    f"ارسال پیام‌های {comp_name} ناموفق بود"
-                ) from error
+            for post in posts:
+                await asyncio.sleep(3)
+                await safe_send_message(bot, CHANNEL_ID, post)
 
     print("🏁 ارسال بازی‌های یافت‌شده تمام شد.")
 
