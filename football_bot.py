@@ -1,5 +1,4 @@
 import asyncio
-import os
 import time
 from datetime import datetime, timedelta
 
@@ -10,9 +9,9 @@ from telegram import Bot
 from telegram.error import TelegramError
 
 # ==================== کلیدها و تنظیمات ====================
-TELEGRAM_BOT_TOKEN = "9214310265:AAENQk-mVivaBSsS0TfWeDk3XJ1FGc37-Gg"
-FOOTBALL_API_KEY = "FOOTBALL_API_KEY", "2e7733d64c92451b871ddf1dfba3ff71"
-API_FOOTBALL_KEY = "API_FOOTBALL_KEY", "35e40e3c03a67c55038905a33c06c74b"
+TELEGRAM_BOT_TOKEN = "7547141381:AAF67Tq648iH8K_G9U8sF8_u6x5c8e2r8wY".strip()
+FOOTBALL_API_KEY = "2e7733d64c92451b871ddf1dfba3ff71".strip()
+API_FOOTBALL_KEY = "35e40e3c03a67c55038905a33c06c74b".strip()
 
 CHANNEL_ID = "@footbal7079"
 
@@ -79,13 +78,13 @@ def convert_utc_to_tehran(utc_date_str):
 
 
 def get_team_form_fd(team_id):
-    """دریافت فرم ۵ بازی اخیر تیم از football-data.org با مدیریت درخواست‌ها"""
+    """دریافت فرم ۵ بازی اخیر تیم از football-data.org"""
     url = f"{BASE_URL_FD}/teams/{team_id}/matches"
     params = {"status": "FINISHED", "limit": 5}
     try:
         response = requests.get(url, headers=HEADERS_FD, params=params, timeout=15)
         if response.status_code == 429:
-            time.sleep(12)  # مکث برای جلوگیری از بلاک شدن لیمیت
+            time.sleep(10)
             response = requests.get(url, headers=HEADERS_FD, params=params, timeout=15)
         
         if response.status_code != 200:
@@ -128,7 +127,7 @@ def calculate_probabilities(home_form, away_form):
 
 
 def fetch_european_matches():
-    """دریافت بازی‌های امروز لیگ‌های اروپایی با رعایت محدودیت نرخ درخواست"""
+    """دریافت بازی‌های امروز لیگ‌های اروپایی"""
     league_posts = {}
     today_jalali = get_tehran_today_str()
     
@@ -144,8 +143,7 @@ def fetch_european_matches():
         try:
             res = requests.get(url, headers=HEADERS_FD, params=params, timeout=20)
             if res.status_code == 429:
-                print(f"⚠️ لیمیت درخواست برای لیگ {league_name}، مکث ۱۵ ثانیه‌ای...")
-                time.sleep(15)
+                time.sleep(12)
                 res = requests.get(url, headers=HEADERS_FD, params=params, timeout=20)
             
             if res.status_code != 200:
@@ -167,7 +165,7 @@ def fetch_european_matches():
                 valid_matches.append((match, jalali_date, match_time))
 
         if not valid_matches:
-            time.sleep(3)
+            time.sleep(2)
             continue
 
         valid_matches.sort(key=lambda item: item[2])
@@ -179,9 +177,9 @@ def fetch_european_matches():
             home_id = match["homeTeam"]["id"]
             away_id = match["awayTeam"]["id"]
 
-            time.sleep(2)  # مکث برای جلوگیری از اتمام لیمیت
+            time.sleep(1.5)
             h_form = get_team_form_fd(home_id)
-            time.sleep(2)
+            time.sleep(1.5)
             a_form = get_team_form_fd(away_id)
 
             p_h, p_d, p_a = calculate_probabilities(h_form, a_form)
@@ -206,7 +204,7 @@ def fetch_european_matches():
             )
             league_posts[league_name].append(post)
 
-        time.sleep(4)
+        time.sleep(3)
 
     return league_posts
 
@@ -217,9 +215,8 @@ def fetch_asian_and_iran_matches():
         return {}
 
     league_posts = {}
-    today_jalali = get_tehran_today_str()
     today_gregorian = datetime.now(pytz.timezone("Asia/Tehran")).strftime("%Y-%m-%d")
-    current_season = "2025"  # فصل جاری
+    current_season = "2025"
 
     for league_id, league_name in ASIAN_LEAGUES.items():
         url = f"{BASE_URL_AF}/fixtures"
@@ -270,10 +267,7 @@ def fetch_asian_and_iran_matches():
 async def main():
     print("🔄 در حال بررسی و دریافت مسابقات امروز...")
     
-    # جمع‌آوری مسابقات اروپایی
     all_grouped_posts = fetch_european_matches()
-
-    # جمع‌آوری مسابقات ایران، آسیا و جام‌های حذفی
     asian_posts = fetch_asian_and_iran_matches()
     for league, posts in asian_posts.items():
         all_grouped_posts[league] = posts
@@ -282,7 +276,6 @@ async def main():
         print("⚠️ برای امروز هیچ مسابقه‌ای در لیگ‌های هدف یافت نشد.")
         return
 
-    # ارسال منظم و تفکیک‌شده به کانال تلگرام
     async with Bot(token=TELEGRAM_BOT_TOKEN) as bot:
         for league_name, posts in all_grouped_posts.items():
             print(f"📌 در حال ارسال بازی‌های {league_name} ({len(posts)} مسابقه)...")
